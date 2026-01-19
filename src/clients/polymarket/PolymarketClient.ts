@@ -1,4 +1,4 @@
-import { ClobClient, Side, OrderType } from '@polymarket/clob-client';
+import { ClobClient, Side, OrderType, AssetType } from '@polymarket/clob-client';
 import { Wallet } from 'ethers';
 import type { PolymarketConfig } from '../../config/schema.js';
 import { PLATFORMS, ORDER_TYPES, ORDER_SIDES, ORDER_STATUSES, OUTCOMES, MARKET_STATUSES } from '../../config/constants.js';
@@ -450,15 +450,18 @@ export class PolymarketClient implements IPlatformClient {
     const timer = startTimer();
 
     try {
-      const balanceData = (await this.client!.getBalanceAllowance()) as unknown as Record<string, unknown>;
+      // Must specify asset_type: COLLATERAL to get USDC balance
+      const balanceData = await this.client!.getBalanceAllowance({
+        asset_type: AssetType.COLLATERAL,
+      });
 
       const durationMs = timer();
       observeApiLatency(this.platform, 'getBalance', durationMs);
       recordApiRequest(this.platform, 'getBalance', 'success');
 
       // Polymarket returns balance in USDC with 6 decimals
-      const collateral = balanceData['collateral'];
-      const available = typeof collateral === 'string' ? parseFloat(collateral) / 1e6 : 0;
+      const balance = balanceData.balance;
+      const available = typeof balance === 'string' ? parseFloat(balance) / 1e6 : 0;
 
       return {
         available,
@@ -478,6 +481,9 @@ export class PolymarketClient implements IPlatformClient {
 
   /**
    * Get current positions
+   * Note: Polymarket SDK doesn't provide a direct positions API.
+   * Positions should be derived from trades or tracked locally.
+   * For paper trading, positions are managed by the PaperTradingEngine.
    */
   async getPositions(): Promise<Position[]> {
     this.ensureClient();
@@ -485,18 +491,16 @@ export class PolymarketClient implements IPlatformClient {
     const timer = startTimer();
 
     try {
-      const balanceData = (await this.client!.getBalanceAllowance()) as unknown as Record<string, unknown>;
+      // Polymarket doesn't have a direct positions endpoint in the CLOB SDK
+      // Positions are typically tracked from trades or through the Gamma API
+      // For now, return empty array - paper trading manages its own positions
+      this.log.debug('Positions endpoint not available in CLOB SDK, returning empty array');
 
       const durationMs = timer();
       observeApiLatency(this.platform, 'getPositions', durationMs);
       recordApiRequest(this.platform, 'getPositions', 'success');
 
-      const positions = balanceData['positions'];
-      if (!Array.isArray(positions)) {
-        return [];
-      }
-
-      return positions.map((pos: unknown) => this.normalizePosition(pos as Record<string, unknown>));
+      return [];
     } catch (error) {
       const durationMs = timer();
       observeApiLatency(this.platform, 'getPositions', durationMs);
@@ -745,29 +749,6 @@ export class PolymarketClient implements IPlatformClient {
       status: status === 'live' ? ORDER_STATUSES.OPEN : status === 'matched' ? ORDER_STATUSES.FILLED : ORDER_STATUSES.CANCELLED,
       createdAt: new Date(Number(o['created_at'] || o['createdAt'] || Date.now()) * 1000),
       updatedAt: new Date(),
-    };
-  }
-
-  private normalizePosition(position: Record<string, unknown>): Position {
-    const size = parseFloat(String(position['size'] || '0'));
-    const avgPrice = parseFloat(String(position['avgPrice'] || '0'));
-    const curPrice = parseFloat(String(position['curPrice'] || avgPrice));
-    const realizedPnl = parseFloat(String(position['realizedPnl'] || '0'));
-    const asset = String(position['asset'] || '');
-
-    return {
-      id: `${this.platform}:${asset}`,
-      platform: this.platform,
-      marketId: asset,
-      outcomeId: asset,
-      outcomeName: 'Unknown',
-      side: size >= 0 ? 'long' : 'short',
-      size,
-      avgEntryPrice: avgPrice,
-      currentPrice: curPrice,
-      unrealizedPnl: size * (curPrice - avgPrice),
-      realizedPnl,
-      isOpen: true,
     };
   }
 

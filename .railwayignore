@@ -1,0 +1,22 @@
+# Files to ignore in Railway deployment
+node_modules
+dist
+.env
+.env.local
+.env.*.local
+.git
+.gitignore
+README.md
+.vscode
+.idea
+*.log
+coverage
+tests
+.cursor
+plans
+keys
+*.key
+*.pem
+DEPLOYMENT.md
+railway.json
+nixpacks.toml

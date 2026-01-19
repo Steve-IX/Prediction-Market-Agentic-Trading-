@@ -1,0 +1,62 @@
+# Railway Environment Variables Template
+# Copy these into Railway dashboard → Variables tab
+# Replace [VALUES] with your actual values
+
+# ============================================
+# Database (Supabase)
+# ============================================
+DATABASE_URL=postgresql://postgres:[PASSWORD]@db.[PROJECT-REF].supabase.co:5432/postgres
+DATABASE_POOL_SIZE=10
+
+# ============================================
+# Polymarket
+# ============================================
+POLYMARKET_PRIVATE_KEY=0x[YOUR-PRIVATE-KEY]
+POLYMARKET_CHAIN_ID=137
+
+# ============================================
+# Kalshi
+# ============================================
+KALSHI_API_KEY_ID=[YOUR-KEY-ID]
+KALSHI_PRIVATE_KEY_PEM=-----BEGIN PRIVATE KEY-----\n[YOUR-KEY]\n-----END PRIVATE KEY-----
+KALSHI_ENVIRONMENT=demo
+
+# ============================================
+# Risk Management
+# ============================================
+MAX_POSITION_SIZE_USD=10000
+MAX_TOTAL_EXPOSURE_USD=50000
+MAX_DAILY_LOSS_USD=1000
+MAX_DRAWDOWN_PERCENT=10
+MIN_ARBITRAGE_SPREAD_BPS=5
+CROSS_PLATFORM_SPREAD_BUFFER=0.15
+
+# ============================================
+# Trading
+# ============================================
+PAPER_TRADING=true
+PAPER_TRADING_BALANCE=10000
+EXECUTION_TIMEOUT_MS=5000
+ORDER_RETRY_ATTEMPTS=3
+ORDER_RETRY_DELAY_MS=1000
+
+# ============================================
+# API
+# ============================================
+API_PORT=3000
+METRICS_PORT=9090
+NODE_ENV=production
+LOG_LEVEL=info
+
+# ============================================
+# Features
+# ============================================
+ENABLE_CROSS_PLATFORM_ARB=true
+ENABLE_SINGLE_PLATFORM_ARB=true
+ENABLE_MARKET_MAKING=false
+ENABLE_WEBSOCKET=true
+
+# ============================================
+# Anthropic (Optional)
+# ============================================
+ANTHROPIC_API_KEY=sk-[YOUR-KEY]

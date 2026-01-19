@@ -1,0 +1,189 @@
+import * as dotenv from 'dotenv';
+import { z } from 'zod';
+import { ConfigSchema, type Config } from './schema.js';
+import { KALSHI_ENDPOINTS, POLYMARKET_ENDPOINTS } from './constants.js';
+
+// Load environment variables
+dotenv.config();
+
+/**
+ * Parse boolean from environment variable
+ */
+function parseBoolean(value: string | undefined, defaultValue: boolean): boolean {
+  if (value === undefined) return defaultValue;
+  return value.toLowerCase() === 'true' || value === '1';
+}
+
+/**
+ * Parse number from environment variable
+ */
+function parseNumber(value: string | undefined, defaultValue: number): number {
+  if (value === undefined) return defaultValue;
+  const parsed = Number(value);
+  return isNaN(parsed) ? defaultValue : parsed;
+}
+
+/**
+ * Get Kalshi host based on environment
+ */
+function getKalshiHost(environment: 'demo' | 'prod'): string {
+  return environment === 'prod' ? KALSHI_ENDPOINTS.PROD : KALSHI_ENDPOINTS.DEMO;
+}
+
+/**
+ * Build configuration object from environment variables
+ */
+function buildConfigFromEnv(): unknown {
+  const env = process.env;
+
+  return {
+    env: env['NODE_ENV'] || 'development',
+    logLevel: env['LOG_LEVEL'] || 'info',
+
+    polymarket: {
+      privateKey: env['POLYMARKET_PRIVATE_KEY'],
+      chainId: parseNumber(env['POLYMARKET_CHAIN_ID'], 137),
+      host: env['POLYMARKET_HOST'] || POLYMARKET_ENDPOINTS.CLOB,
+      gammaHost: env['POLYMARKET_GAMMA_HOST'] || POLYMARKET_ENDPOINTS.GAMMA,
+      wsHost: env['POLYMARKET_WS_HOST'] || POLYMARKET_ENDPOINTS.WS,
+      signatureType: env['POLYMARKET_SIGNATURE_TYPE'] || 'EOA',
+    },
+
+    kalshi: {
+      apiKeyId: env['KALSHI_API_KEY_ID'],
+      privateKeyPath: env['KALSHI_PRIVATE_KEY_PATH'],
+      privateKeyPem: env['KALSHI_PRIVATE_KEY_PEM'],
+      environment: (env['KALSHI_ENVIRONMENT'] as 'demo' | 'prod') || 'demo',
+      host: env['KALSHI_HOST'] || getKalshiHost((env['KALSHI_ENVIRONMENT'] as 'demo' | 'prod') || 'demo'),
+    },
+
+    database: {
+      url: env['DATABASE_URL'] || 'postgresql://localhost:5432/prediction_trading',
+      poolSize: parseNumber(env['DATABASE_POOL_SIZE'], 10),
+    },
+
+    redis: {
+      url: env['REDIS_URL'] || 'redis://localhost:6379',
+      enabled: parseBoolean(env['REDIS_ENABLED'], false),
+    },
+
+    risk: {
+      maxPositionSizeUsd: parseNumber(env['MAX_POSITION_SIZE_USD'], 10000),
+      maxTotalExposureUsd: parseNumber(env['MAX_TOTAL_EXPOSURE_USD'], 50000),
+      maxDailyLossUsd: parseNumber(env['MAX_DAILY_LOSS_USD'], 1000),
+      maxDrawdownPercent: parseNumber(env['MAX_DRAWDOWN_PERCENT'], 10),
+      minArbitrageSpreadBps: parseNumber(env['MIN_ARBITRAGE_SPREAD_BPS'], 5),
+      crossPlatformSpreadBuffer: parseNumber(env['CROSS_PLATFORM_SPREAD_BUFFER'], 0.15),
+    },
+
+    trading: {
+      paperTrading: parseBoolean(env['PAPER_TRADING'], true),
+      paperTradingBalance: parseNumber(env['PAPER_TRADING_BALANCE'], 10000),
+      executionTimeoutMs: parseNumber(env['EXECUTION_TIMEOUT_MS'], 5000),
+      orderRetryAttempts: parseNumber(env['ORDER_RETRY_ATTEMPTS'], 3),
+      orderRetryDelayMs: parseNumber(env['ORDER_RETRY_DELAY_MS'], 1000),
+    },
+
+    api: {
+      port: parseNumber(env['API_PORT'], 3000),
+      metricsPort: parseNumber(env['METRICS_PORT'], 9090),
+      secret: env['API_SECRET'],
+      enableMetrics: parseBoolean(env['ENABLE_METRICS'], true),
+    },
+
+    features: {
+      enableCrossPlatformArb: parseBoolean(env['ENABLE_CROSS_PLATFORM_ARB'], true),
+      enableSinglePlatformArb: parseBoolean(env['ENABLE_SINGLE_PLATFORM_ARB'], true),
+      enableMarketMaking: parseBoolean(env['ENABLE_MARKET_MAKING'], false),
+      enableWebSocket: parseBoolean(env['ENABLE_WEBSOCKET'], true),
+    },
+
+    anthropic: {
+      apiKey: env['ANTHROPIC_API_KEY'],
+      model: env['ANTHROPIC_MODEL'] || 'claude-sonnet-4-20250514',
+      maxTokens: parseNumber(env['ANTHROPIC_MAX_TOKENS'], 1024),
+    },
+  };
+}
+
+/**
+ * Validate and load configuration
+ */
+function loadConfig(): Config {
+  const rawConfig = buildConfigFromEnv();
+
+  try {
+    return ConfigSchema.parse(rawConfig);
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      const issues = error.issues.map((issue) => `  - ${issue.path.join('.')}: ${issue.message}`).join('\n');
+      throw new Error(`Configuration validation failed:\n${issues}`);
+    }
+    throw error;
+  }
+}
+
+// Singleton config instance
+let configInstance: Config | null = null;
+
+/**
+ * Get the configuration instance (lazy loaded)
+ */
+export function getConfig(): Config {
+  if (!configInstance) {
+    configInstance = loadConfig();
+  }
+  return configInstance;
+}
+
+/**
+ * Reload configuration from environment (useful for testing)
+ */
+export function reloadConfig(): Config {
+  configInstance = loadConfig();
+  return configInstance;
+}
+
+/**
+ * Validate that required credentials are present for a platform
+ */
+export function validateCredentials(platform: 'polymarket' | 'kalshi'): { valid: boolean; missing: string[] } {
+  const config = getConfig();
+  const missing: string[] = [];
+
+  if (platform === 'polymarket') {
+    if (!config.polymarket.privateKey) {
+      missing.push('POLYMARKET_PRIVATE_KEY');
+    }
+  } else if (platform === 'kalshi') {
+    if (!config.kalshi.apiKeyId) {
+      missing.push('KALSHI_API_KEY_ID');
+    }
+    if (!config.kalshi.privateKeyPath && !config.kalshi.privateKeyPem) {
+      missing.push('KALSHI_PRIVATE_KEY_PATH or KALSHI_PRIVATE_KEY_PEM');
+    }
+  }
+
+  return {
+    valid: missing.length === 0,
+    missing,
+  };
+}
+
+/**
+ * Check if running in paper trading mode
+ */
+export function isPaperTrading(): boolean {
+  return getConfig().trading.paperTrading;
+}
+
+/**
+ * Check if a feature is enabled
+ */
+export function isFeatureEnabled(feature: keyof Config['features']): boolean {
+  return getConfig().features[feature];
+}
+
+// Re-export types and constants
+export * from './schema.js';
+export * from './constants.js';

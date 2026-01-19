@@ -178,11 +178,16 @@ export class PolymarketClient implements IPlatformClient {
       });
 
       // Filter out events without markets and safely map
+      // Also filter out markets without tokens (required for normalizeMarket)
       const markets = events
         .filter((event): event is GammaEvent & { markets: NonNullable<GammaEvent['markets']> } => 
           event && Array.isArray(event.markets) && event.markets.length > 0
         )
-        .flatMap((event) => event.markets.map((market) => this.normalizeMarket(market, event)));
+        .flatMap((event) => 
+          event.markets
+            .filter((market) => market && Array.isArray(market.tokens) && market.tokens.length > 0)
+            .map((market) => this.normalizeMarket(market, event))
+        );
 
       const durationMs = timer();
       observeApiLatency(this.platform, 'getMarkets', durationMs);

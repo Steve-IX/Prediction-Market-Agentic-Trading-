@@ -512,10 +512,33 @@ export class TradingEngine extends EventEmitter {
     this.log.debug('Refreshing markets...');
 
     try {
-      const [polymarketMarkets, kalshiMarkets] = await Promise.all([
-        this.polymarketClient.getMarkets({ activeOnly: true, limit: 100 }),
-        this.kalshiClient.getMarkets({ activeOnly: true, limit: 100 }),
+      // Only fetch from connected platforms
+      const polymarketPromise = this.polymarketClient.isConnected()
+        ? this.polymarketClient.getMarkets({ activeOnly: true, limit: 100 })
+        : Promise.resolve([]);
+      
+      const kalshiPromise = this.kalshiClient.isConnected()
+        ? this.kalshiClient.getMarkets({ activeOnly: true, limit: 100 })
+        : Promise.resolve([]);
+
+      const [polymarketResult, kalshiResult] = await Promise.allSettled([
+        polymarketPromise,
+        kalshiPromise,
       ]);
+
+      const polymarketMarkets = polymarketResult.status === 'fulfilled' ? polymarketResult.value : [];
+      const kalshiMarkets = kalshiResult.status === 'fulfilled' ? kalshiResult.value : [];
+
+      if (polymarketResult.status === 'rejected') {
+        this.log.error('Failed to fetch Polymarket markets', {
+          error: polymarketResult.reason instanceof Error ? polymarketResult.reason.message : String(polymarketResult.reason),
+        });
+      }
+      if (kalshiResult.status === 'rejected') {
+        this.log.warn('Failed to fetch Kalshi markets (may be missing credentials)', {
+          error: kalshiResult.reason instanceof Error ? kalshiResult.reason.message : String(kalshiResult.reason),
+        });
+      }
 
       this.markets.set(PLATFORMS.POLYMARKET, polymarketMarkets);
       this.markets.set(PLATFORMS.KALSHI, kalshiMarkets);

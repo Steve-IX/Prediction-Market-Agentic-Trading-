@@ -13,6 +13,8 @@
     "test:coverage": "vitest run --coverage",
     "test:unit": "vitest run tests/unit",
     "test:integration": "vitest run tests/integration",
+    "test:websocket": "vitest run tests/integration/websocket.test.ts",
+    "test:e2e": "E2E_TEST=true vitest run tests/integration/e2e.test.ts",
     "db:setup": "tsx scripts/setup-db.ts",
     "db:setup-timescale": "tsx scripts/setup-timescaledb.ts",
     "backtest": "tsx scripts/backtest.ts",

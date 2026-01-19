@@ -62,6 +62,13 @@ pnpm dev
 # Production build
 pnpm build
 pnpm start
+
+# Run tests
+pnpm test              # All tests
+pnpm test:unit         # Unit tests only
+pnpm test:integration  # Integration tests
+pnpm test:websocket    # WebSocket tests
+pnpm test:e2e          # E2E tests (requires credentials)
 ```
 
 ## Configuration
@@ -121,6 +128,8 @@ src/
 - [x] API endpoints (health, markets, positions, trades, strategies)
 - [x] Prometheus metrics
 - [x] Deployment configuration (Railway, Neon, Docker)
+- [x] WebSocket connection tests (with mock servers)
+- [x] End-to-end integration tests (with real API connections)
 
 **Overall Completion: ~95%** - See [COMPLETION_REPORT.md](./COMPLETION_REPORT.md) for details.
 

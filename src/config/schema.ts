@@ -3,6 +3,10 @@ import { z } from 'zod';
 // Polymarket configuration schema
 const PolymarketConfigSchema = z.object({
   privateKey: z.string().optional(),
+  // L2 API credentials - use these directly instead of deriving from private key
+  apiKey: z.string().optional(),
+  apiSecret: z.string().optional(),
+  apiPassphrase: z.string().optional(),
   chainId: z.number().default(137),
   host: z.string().default('https://clob.polymarket.com'),
   gammaHost: z.string().default('https://gamma-api.polymarket.com'),

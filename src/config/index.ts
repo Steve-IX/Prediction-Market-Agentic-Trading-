@@ -42,6 +42,10 @@ function buildConfigFromEnv(): unknown {
 
     polymarket: {
       privateKey: env['POLYMARKET_PRIVATE_KEY'],
+      // L2 API credentials - use these directly for live trading
+      apiKey: env['POLYMARKET_API_KEY'],
+      apiSecret: env['POLYMARKET_API_SECRET'],
+      apiPassphrase: env['POLYMARKET_API_PASSPHRASE'],
       chainId: parseNumber(env['POLYMARKET_CHAIN_ID'], 137),
       host: env['POLYMARKET_HOST'] || POLYMARKET_ENDPOINTS.CLOB,
       gammaHost: env['POLYMARKET_GAMMA_HOST'] || POLYMARKET_ENDPOINTS.GAMMA,
@@ -147,7 +151,7 @@ export function reloadConfig(): Config {
 /**
  * Validate that required credentials are present for a platform
  */
-export function validateCredentials(platform: 'polymarket' | 'kalshi'): { valid: boolean; missing: string[] } {
+export function validateCredentials(platform: 'polymarket' | 'kalshi'): { valid: boolean; missing: string[]; hasL2Creds?: boolean } {
   const config = getConfig();
   const missing: string[] = [];
 
@@ -155,6 +159,13 @@ export function validateCredentials(platform: 'polymarket' | 'kalshi'): { valid:
     if (!config.polymarket.privateKey) {
       missing.push('POLYMARKET_PRIVATE_KEY');
     }
+    // Check for L2 API credentials (optional but recommended for live trading)
+    const hasL2Creds = !!(config.polymarket.apiKey && config.polymarket.apiSecret && config.polymarket.apiPassphrase);
+    return {
+      valid: missing.length === 0,
+      missing,
+      hasL2Creds,
+    };
   } else if (platform === 'kalshi') {
     if (!config.kalshi.apiKeyId) {
       missing.push('KALSHI_API_KEY_ID');

@@ -65,6 +65,41 @@ export class PolymarketClient implements IPlatformClient {
       this.signer = new Wallet(this.config.privateKey);
       this.log.info('Wallet initialized', { address: this.signer.address });
 
+      // Map signature type
+      const signatureType = this.mapSignatureType(this.config.signatureType);
+
+      // Check if L2 API credentials are provided directly
+      if (this.config.apiKey && this.config.apiSecret && this.config.apiPassphrase) {
+        // Use provided L2 API credentials directly
+        this.log.info('Using provided L2 API credentials');
+        
+        const apiCreds = {
+          key: this.config.apiKey,
+          secret: this.config.apiSecret,
+          passphrase: this.config.apiPassphrase,
+        };
+
+        // Initialize trading client with provided credentials
+        this.client = new ClobClient(this.config.host, this.config.chainId, this.signer, apiCreds, signatureType);
+
+        this.connected = true;
+        this.readOnly = false;
+
+        const durationMs = timer();
+        observeApiLatency(this.platform, 'connect', durationMs);
+        recordApiRequest(this.platform, 'connect', 'success');
+
+        this.log.info('Connected to Polymarket CLOB with L2 credentials', {
+          address: this.signer.address,
+          chainId: this.config.chainId,
+          durationMs,
+        });
+        return;
+      }
+
+      // No L2 credentials provided - try to derive API credentials
+      this.log.info('No L2 API credentials provided, attempting to derive...');
+      
       // Create temporary client to derive API credentials
       const tempClient = new ClobClient(this.config.host, this.config.chainId, this.signer);
 
@@ -82,10 +117,7 @@ export class PolymarketClient implements IPlatformClient {
         }
       );
 
-      this.log.debug('API credentials obtained');
-
-      // Map signature type
-      const signatureType = this.mapSignatureType(this.config.signatureType);
+      this.log.debug('API credentials derived successfully');
 
       // Initialize trading client with credentials
       this.client = new ClobClient(this.config.host, this.config.chainId, this.signer, apiCreds, signatureType);

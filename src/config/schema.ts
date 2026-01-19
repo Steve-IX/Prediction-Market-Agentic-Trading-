@@ -75,7 +75,7 @@ const AnthropicConfigSchema = z.object({
 
 // Main configuration schema
 export const ConfigSchema = z.object({
-  env: z.enum(['development', 'staging', 'production']).default('development'),
+  env: z.enum(['development', 'staging', 'production', 'test']).default('development'),
   logLevel: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
 
   polymarket: PolymarketConfigSchema,

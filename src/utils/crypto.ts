@@ -62,14 +62,22 @@ export function signRSAPSS(
   const keyObject = typeof privateKey === 'string' ? crypto.createPrivateKey(privateKey) : privateKey;
   const dataBuffer = typeof data === 'string' ? Buffer.from(data, 'utf8') : data;
 
-  // Use RSA-PSS padding (Node.js uses different constant names)
-  const padding = (crypto.constants as unknown as { RSA_PSS_PADDING?: number }).RSA_PSS_PADDING ?? 4;
-  const saltLength = (crypto.constants as unknown as { RSA_PSS_SALTLEN_MAX_SIGN?: number }).RSA_PSS_SALTLEN_MAX_SIGN ?? -1;
-  const signature = crypto.sign('RSA-SHA256', dataBuffer, {
+  // Use RSA-PSS padding - Node.js uses RSA_PKCS1_PSS_PADDING constant
+  // For RSA-PSS, we need to use the createSign API with proper options
+  const signer = crypto.createSign('RSA-SHA256');
+  signer.update(dataBuffer);
+  
+  // Use RSA-PSS padding (constant value is 6 for RSA_PKCS1_PSS_PADDING)
+  const padding = crypto.constants.RSA_PKCS1_PSS_PADDING ?? 6;
+  const saltLength = crypto.constants.RSA_PSS_SALTLEN_MAX_SIGN ?? -1;
+  
+  const signature = signer.sign({
     key: keyObject,
     padding,
     saltLength,
   });
+  
+  return signature.toString('base64');
 
   return signature.toString('base64');
 }
@@ -92,11 +100,13 @@ export function verifyRSAPSS(
     const signatureBuffer = Buffer.from(signature, 'base64');
 
     // Use RSA-PSS padding
-    const padding = (crypto.constants as unknown as { RSA_PSS_PADDING?: number }).RSA_PSS_PADDING ?? 4;
-    const saltLength = (crypto.constants as unknown as { RSA_PSS_SALTLEN_MAX_SIGN?: number }).RSA_PSS_SALTLEN_MAX_SIGN ?? -1;
-    return crypto.verify(
-      'RSA-SHA256',
-      dataBuffer,
+    const verifier = crypto.createVerify('RSA-SHA256');
+    verifier.update(dataBuffer);
+    
+    const padding = crypto.constants.RSA_PKCS1_PSS_PADDING ?? 6;
+    const saltLength = crypto.constants.RSA_PSS_SALTLEN_MAX_SIGN ?? -1;
+    
+    return verifier.verify(
       {
         key: keyObject,
         padding,

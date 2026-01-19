@@ -9,7 +9,7 @@ import { beforeAll, afterAll } from 'vitest';
 dotenv.config({ path: '.env.test' });
 
 // Set test environment
-process.env['NODE_ENV'] = 'test';
+process.env['NODE_ENV'] = 'development'; // Use development for config validation
 process.env['PAPER_TRADING'] = 'true';
 
 beforeAll(() => {

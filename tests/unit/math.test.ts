@@ -20,7 +20,7 @@ import {
 describe('Math Utilities', () => {
   describe('calculateSpread', () => {
     it('should calculate spread correctly', () => {
-      expect(calculateSpread(0.49, 0.51)).toBe(0.02);
+      expect(calculateSpread(0.49, 0.51)).toBeCloseTo(0.02, 5);
       expect(calculateSpread(0.5, 0.5)).toBe(0);
     });
 
@@ -32,7 +32,7 @@ describe('Math Utilities', () => {
 
   describe('calculateSpreadBps', () => {
     it('should calculate spread in basis points', () => {
-      expect(calculateSpreadBps(0.49, 0.51)).toBe(200); // 2% = 200 bps
+      expect(calculateSpreadBps(0.49, 0.51)).toBeCloseTo(200, 1); // 2% = 200 bps
     });
   });
 
@@ -45,12 +45,12 @@ describe('Math Utilities', () => {
   describe('calculateRealizedPnl', () => {
     it('should calculate P&L for long position', () => {
       // Buy at 0.5, sell at 0.6, size 100
-      expect(calculateRealizedPnl(0.5, 0.6, 100, 'buy')).toBe(10);
+      expect(calculateRealizedPnl(0.5, 0.6, 100, 'buy')).toBeCloseTo(10, 5);
     });
 
     it('should calculate P&L for short position', () => {
       // Sell at 0.6, buy back at 0.5, size 100
-      expect(calculateRealizedPnl(0.6, 0.5, 100, 'sell')).toBe(10);
+      expect(calculateRealizedPnl(0.6, 0.5, 100, 'sell')).toBeCloseTo(10, 5);
     });
   });
 

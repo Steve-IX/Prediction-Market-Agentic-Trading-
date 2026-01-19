@@ -120,6 +120,7 @@ async function main(): Promise<void> {
   const { createHealthRouter } = await import('./api/routes/health.js');
   const { createTradesRouter } = await import('./api/routes/trades.js');
   const { createStrategiesRouter } = await import('./api/routes/strategies.js');
+  const { createOrdersRouter } = await import('./api/routes/orders.js');
   const { StrategyRegistry } = await import('./strategies/index.js');
 
   // Create strategy registry (empty for now - strategies would be registered here)
@@ -134,6 +135,7 @@ async function main(): Promise<void> {
   }));
 
   app.use('/api/trades', createTradesRouter(orderManager));
+  app.use('/api/orders', createOrdersRouter(orderManager));
   app.use('/api/strategies', createStrategiesRouter(strategyRegistry));
 
   // Legacy health check endpoint (keep for backward compatibility)
@@ -374,6 +376,12 @@ async function main(): Promise<void> {
     markets: 'GET /api/markets',
     positions: 'GET /api/positions',
     balances: 'GET /api/balances',
+    orders: 'GET /api/orders',
+    orderById: 'GET /api/orders/:id',
+    cancelOrder: 'DELETE /api/orders/:id',
+    cancelAllOrders: 'DELETE /api/orders',
+    trades: 'GET /api/trades',
+    strategies: 'GET /api/strategies',
     tradingStatus: 'GET /api/trading/status',
     tradingPairs: 'GET /api/trading/pairs',
     tradingStart: 'POST /api/trading/start',

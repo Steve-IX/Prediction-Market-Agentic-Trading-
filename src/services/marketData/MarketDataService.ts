@@ -106,18 +106,26 @@ export class MarketDataService extends EventEmitter {
       errors.push(error instanceof Error ? error : new Error(String(error)));
     }
 
-    // Connect to Kalshi
+    // Connect to Kalshi (only if credentials available)
+    // Check if Kalshi has credentials by attempting connection
+    // KalshiWebSocket will throw if credentials are missing, which is expected
     try {
       await this.kalshiWs.connect();
       this.log.info('Connected to Kalshi WebSocket');
     } catch (error) {
-      this.log.error('Failed to connect to Kalshi WebSocket', {
-        error: error instanceof Error ? error.message : String(error),
-      });
-      errors.push(error instanceof Error ? error : new Error(String(error)));
+      // If Kalshi connection fails due to missing credentials, log info and continue
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      if (errorMsg.includes('KALSHI_API_KEY_ID is required') || errorMsg.includes('required')) {
+        this.log.info('Kalshi credentials not available, skipping Kalshi WebSocket connection');
+      } else {
+        this.log.warn('Failed to connect to Kalshi WebSocket', {
+          error: errorMsg,
+        });
+        errors.push(error instanceof Error ? error : new Error(String(error)));
+      }
     }
 
-    // At least one connection should succeed
+    // At least one connection should succeed (Polymarket or Kalshi)
     if (errors.length === 2) {
       throw new Error('Failed to connect to any WebSocket feed');
     }

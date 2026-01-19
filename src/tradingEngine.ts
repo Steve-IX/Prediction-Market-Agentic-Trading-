@@ -161,15 +161,28 @@ export class TradingEngine extends EventEmitter {
     this.log.info('Initializing trading engine...');
 
     try {
-      // Ensure platform clients are connected
+      // Ensure platform clients are connected (only if credentials available)
       if (!this.polymarketClient.isConnected()) {
         await this.polymarketClient.connect();
       }
-      if (!this.kalshiClient.isConnected()) {
-        await this.kalshiClient.connect();
+      
+      // Only connect to Kalshi if it has valid credentials
+      const kalshiCreds = this.appConfig.kalshi;
+      if (kalshiCreds.apiKeyId && !this.kalshiClient.isConnected()) {
+        try {
+          await this.kalshiClient.connect();
+          this.log.info('Kalshi client connected for trading engine');
+        } catch (error) {
+          // If Kalshi connection fails, log warning but continue with Polymarket-only mode
+          this.log.warn('Kalshi connection failed, continuing in Polymarket-only mode', {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      } else {
+        this.log.info('Kalshi credentials not available, running in Polymarket-only mode');
       }
 
-      // Fetch initial markets
+      // Fetch initial markets (will work with available platforms)
       await this.refreshMarkets();
 
       // Find matched market pairs
@@ -178,9 +191,18 @@ export class TradingEngine extends EventEmitter {
       }
 
       // Connect market data service if WebSocket enabled
+      // MarketDataService handles missing Kalshi credentials gracefully
       if (this.config.enableWebSocket) {
-        await this.marketDataService.connect();
-        this.subscribeToTrackedMarkets();
+        try {
+          await this.marketDataService.connect();
+          this.subscribeToTrackedMarkets();
+        } catch (error) {
+          // If WebSocket connection fails, log warning but continue
+          // (MarketDataService will connect to available platforms)
+          this.log.warn('Market data service connection had issues, continuing anyway', {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
       }
 
       this.state.isInitialized = true;

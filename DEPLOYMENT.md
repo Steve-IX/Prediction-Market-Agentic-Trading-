@@ -1,71 +1,87 @@
-# Deployment Guide: Railway + Supabase
+# Deployment Guide: Railway + Neon
 
-This guide walks you through deploying the Prediction Market Trading Bot to Railway (application) and Supabase (database).
+This guide walks you through deploying the Prediction Market Trading Bot to Railway (application) and Neon (database).
 
 ## Prerequisites
 
 - GitHub account (for Railway deployment)
-- Supabase account (free tier available)
+- Neon account (free tier available)
 - Railway account (free tier available, but consider Pro for 24/7 uptime)
 - Your API keys (Polymarket private key, Kalshi API keys)
 
-## Step 1: Set Up Supabase Database
+## Step 1: Set Up Neon Database
 
-### 1.1 Create Supabase Project
+### 1.1 Create Neon Project
 
-1. Go to [supabase.com](https://supabase.com) and sign up/login
-2. Click "New Project"
+1. Go to [neon.tech](https://neon.tech) and sign up/login
+2. Click "Create Project"
 3. Fill in:
    - **Name**: `prediction-trading` (or your choice)
-   - **Database Password**: Generate a strong password (save it!)
    - **Region**: Choose closest to your Railway deployment
-   - **Pricing Plan**: Free tier is fine to start
+   - **PostgreSQL Version**: 15 or 16 (recommended)
+   - **Compute Size**: Free tier is fine to start
 
 ### 1.2 Get Database Connection String
 
-1. In your Supabase project, go to **Settings** → **Database**
-2. Find **Connection string** section
-3. Copy the **URI** connection string (looks like: `postgresql://postgres:[YOUR-PASSWORD]@db.xxx.supabase.co:5432/postgres`)
-4. Replace `[YOUR-PASSWORD]` with your actual database password
+1. In your Neon project dashboard, go to **Connection Details**
+2. You'll see two connection strings:
+   - **Pooled connection** (recommended): Better for serverless/server environments
+   - **Direct connection**: Direct connection to database
+3. Copy the **Pooled connection** string
+4. It looks like: `postgresql://user:password@ep-xxx-xxx-pooler.region.aws.neon.tech/neondb?sslmode=require`
+
+**Note**: Neon connection strings include the database name (usually `neondb` or your project name).
 
 ### 1.3 Run Database Setup
 
-**Option A: Using Supabase SQL Editor**
-
-1. Go to **SQL Editor** in Supabase dashboard
-2. Run the migrations from `src/database/migrations/` (if you have them)
-3. Or use Drizzle Kit to push schema:
+**Option A: Using Drizzle Push (Recommended)**
 
 ```bash
 # Set your DATABASE_URL
-export DATABASE_URL="postgresql://postgres:[PASSWORD]@db.xxx.supabase.co:5432/postgres"
+export DATABASE_URL="postgresql://user:password@ep-xxx-xxx-pooler.region.aws.neon.tech/neondb?sslmode=require"
 
 # Push schema
 pnpm db:push
 ```
 
-**Option B: Using Setup Script**
+**Option B: Using Migrations**
 
 ```bash
 # Set DATABASE_URL
-export DATABASE_URL="postgresql://postgres:[PASSWORD]@db.xxx.supabase.co:5432/postgres"
+export DATABASE_URL="postgresql://user:password@ep-xxx-xxx-pooler.region.aws.neon.tech/neondb?sslmode=require"
+
+# Run migrations
+pnpm db:migrate
+```
+
+**Option C: Using Setup Script**
+
+```bash
+# Set DATABASE_URL
+export DATABASE_URL="postgresql://user:password@ep-xxx-xxx-pooler.region.aws.neon.tech/neondb?sslmode=require"
 
 # Run setup script
 pnpm db:setup
 ```
 
-### 1.4 TimescaleDB Note
+### 1.4 Set Up TimescaleDB (Optional but Recommended)
 
-⚠️ **Important**: Supabase doesn't include TimescaleDB by default. You have two options:
+Neon supports TimescaleDB extension! This is great for time-series price data.
 
-1. **Skip TimescaleDB** (recommended for start):
-   - The app will work fine with regular PostgreSQL
-   - You can add TimescaleDB later if needed
-   - Comment out TimescaleDB-specific code if it causes errors
+1. In Neon Console, go to your project → **Extensions**
+2. Search for **"timescaledb"**
+3. Click **"Enable"**
+4. After enabling, run:
 
-2. **Use Neon instead** (if you need TimescaleDB):
-   - Neon has TimescaleDB support
-   - Follow similar setup but use Neon connection string
+```bash
+# Set DATABASE_URL
+export DATABASE_URL="postgresql://user:password@ep-xxx-xxx-pooler.region.aws.neon.tech/neondb?sslmode=require"
+
+# Set up TimescaleDB hypertables
+pnpm db:setup-timescale
+```
+
+This converts the `price_history` table to a hypertable for better performance.
 
 ## Step 2: Set Up Railway Application
 
@@ -92,7 +108,7 @@ Go to **Variables** tab and add all required environment variables:
 
 #### Database
 ```
-DATABASE_URL=postgresql://postgres:[PASSWORD]@db.xxx.supabase.co:5432/postgres
+DATABASE_URL=postgresql://user:password@ep-xxx-xxx-pooler.region.aws.neon.tech/neondb?sslmode=require
 DATABASE_POOL_SIZE=10
 ```
 
@@ -180,8 +196,13 @@ If you haven't already, run migrations:
 
 ```bash
 # Connect to Railway shell or use local machine with DATABASE_URL set
-pnpm db:setup
+pnpm db:migrate
 ```
+
+Or use Railway's one-click shell:
+1. Go to Railway dashboard → Your service
+2. Click "Deployments" → Latest deployment → "Shell"
+3. Run: `pnpm db:migrate`
 
 ### 4.2 Verify Database Connection
 
@@ -198,31 +219,37 @@ Check logs in Railway to ensure database connection is successful.
 ### 5.1 View Logs
 
 - Railway dashboard → Your service → **Deployments** → Click deployment → **View Logs**
+- Neon dashboard → Your project → **Logs** (for database logs)
 
 ### 5.2 Monitor Metrics
 
 - Access Prometheus metrics: `https://your-app.up.railway.app/metrics`
 - Set up Grafana or similar for visualization (optional)
+- Neon provides built-in query analytics
 
 ### 5.3 Set Up Alerts
 
 1. Railway Pro plan includes alerts
 2. Or use external monitoring (UptimeRobot, etc.)
 3. Monitor health endpoint
+4. Set up Neon alerts for database issues
 
 ### 5.4 Database Backups
 
-- Supabase automatically backs up your database
-- Free tier: Daily backups
-- Pro tier: Point-in-time recovery
+- Neon automatically backs up your database
+- Free tier: 7-day point-in-time recovery
+- Pro tier: 30-day point-in-time recovery
+- Can restore to any point in time via Neon Console
 
 ## Troubleshooting
 
 ### Database Connection Issues
 
-- Verify `DATABASE_URL` is correct
-- Check Supabase firewall settings (should allow all IPs by default)
+- Verify `DATABASE_URL` is correct (use pooled connection for Railway)
+- Check Neon firewall settings (should allow all IPs by default)
 - Ensure password is URL-encoded if it contains special characters
+- Verify database name is correct in connection string
+- Try direct connection string if pooled doesn't work
 
 ### Build Failures
 
@@ -241,43 +268,56 @@ Check logs in Railway to ensure database connection is successful.
 
 If you see TimescaleDB errors:
 
-1. Comment out TimescaleDB setup in `scripts/setup-timescaledb.ts`
-2. Or switch to Neon database (has TimescaleDB support)
+1. Ensure TimescaleDB extension is enabled in Neon Console
+2. Run `pnpm db:setup-timescale` after enabling
+3. Check Neon logs for extension errors
 
 ## Cost Estimates
 
 ### Free Tier (Development/Testing)
 - **Railway**: $5/month (Pro plan needed for 24/7, free tier sleeps)
-- **Supabase**: Free (500MB database, 2GB bandwidth)
+- **Neon**: Free (0.5 GB database, auto-pauses when idle)
 
 ### Production (Recommended)
 - **Railway Pro**: $20/month (always-on, better performance)
-- **Supabase Pro**: $25/month (8GB database, better performance)
+- **Neon Pro**: $19/month (10 GB database, always-on, better performance)
 
-**Total**: ~$45/month for production setup
+**Total**: ~$39/month for production setup
 
 ## Security Best Practices
 
 1. ✅ Never commit `.env` files
 2. ✅ Use Railway secrets for sensitive data
 3. ✅ Rotate API keys regularly
-4. ✅ Enable Supabase Row Level Security (if storing sensitive data)
+4. ✅ Use Neon's IP allowlist if needed
 5. ✅ Use HTTPS (Railway provides automatically)
 6. ✅ Monitor for unauthorized access
 7. ✅ Start with `PAPER_TRADING=true` always
+8. ✅ Use pooled connections for better security
+
+## Neon Advantages
+
+✅ **TimescaleDB Support**: Built-in support for time-series data  
+✅ **Serverless**: Auto-scales and pauses when not in use (free tier)  
+✅ **Branching**: Create database branches for testing  
+✅ **Point-in-Time Recovery**: Restore to any point in time  
+✅ **Connection Pooling**: Automatic connection management  
+✅ **Fast**: Low latency, global regions  
+✅ **Free Tier**: Generous free tier for development  
 
 ## Next Steps
 
 1. ✅ Deploy to Railway
-2. ✅ Set up Supabase database
+2. ✅ Set up Neon database
 3. ✅ Configure environment variables
-4. ✅ Test with paper trading
-5. ✅ Monitor logs and metrics
-6. ✅ Gradually enable features
-7. ⚠️ **Only enable live trading after thorough testing!**
+4. ✅ Run database migrations
+5. ✅ Test with paper trading
+6. ✅ Monitor logs and metrics
+7. ✅ Gradually enable features
+8. ⚠️ **Only enable live trading after thorough testing!**
 
 ## Support
 
 - Railway Docs: https://docs.railway.app
-- Supabase Docs: https://supabase.com/docs
+- Neon Docs: https://neon.tech/docs
 - Project Issues: Check GitHub issues

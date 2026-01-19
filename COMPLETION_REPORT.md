@@ -182,7 +182,7 @@ All required folders and files are present:
 ### 12. Documentation ✅
 - ✅ `README.md` - Project overview and quick start
 - ✅ `DEPLOYMENT.md` - Deployment instructions
-- ✅ `SUPABASE_SETUP.md` - Supabase setup guide
+- ✅ `NEON_SETUP.md` - Neon database setup guide
 - ✅ Code comments and JSDoc
 
 ### 13. Build & Deployment ✅
@@ -271,7 +271,7 @@ All required folders and files are present:
 ## ✅ READY FOR:
 - ✅ Paper trading simulation
 - ✅ Backtesting
-- ✅ Deployment to Railway/Supabase
+- ✅ Deployment to Railway/Neon
 - ✅ Live trading (after testing in paper mode)
 
 ## 🚀 NEXT STEPS:

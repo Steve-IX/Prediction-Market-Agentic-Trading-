@@ -3,9 +3,10 @@
 # Replace [VALUES] with your actual values
 
 # ============================================
-# Database (Supabase)
+# Database (Neon)
 # ============================================
-DATABASE_URL=postgresql://postgres:[PASSWORD]@db.[PROJECT-REF].supabase.co:5432/postgres
+# Use pooled connection string from Neon Console
+DATABASE_URL=postgresql://[USER]:[PASSWORD]@ep-[PROJECT-REF]-pooler.[REGION].aws.neon.tech/[DATABASE]?sslmode=require
 DATABASE_POOL_SIZE=10
 
 # ============================================

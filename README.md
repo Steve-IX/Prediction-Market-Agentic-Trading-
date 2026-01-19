@@ -17,7 +17,7 @@ Cross-platform prediction market arbitrage trading bot for Polymarket and Kalshi
 
 - Node.js 20+
 - pnpm
-- PostgreSQL database (Neon, Supabase, or local)
+- PostgreSQL database (Neon recommended, or local)
 - Polymarket wallet (Ethereum private key)
 - Kalshi API keys (optional for Kalshi trading)
 
@@ -120,19 +120,19 @@ src/
 - [x] Analytics (P&L calculation, performance metrics)
 - [x] API endpoints (health, markets, positions, trades, strategies)
 - [x] Prometheus metrics
-- [x] Deployment configuration (Railway, Supabase, Docker)
+- [x] Deployment configuration (Railway, Neon, Docker)
 
 **Overall Completion: ~95%** - See [COMPLETION_REPORT.md](./COMPLETION_REPORT.md) for details.
 
 ## Deployment
 
-### Railway + Supabase
+### Railway + Neon
 
-This project is configured for deployment on Railway (application) and Supabase (database).
+This project is configured for deployment on Railway (application) and Neon (database).
 
 **Quick Start:**
 1. See [DEPLOYMENT.md](./DEPLOYMENT.md) for detailed instructions
-2. Set up Supabase database and get connection string
+2. Set up Neon database and get connection string
 3. Deploy to Railway from GitHub
 4. Configure environment variables in Railway dashboard
 5. Run database migrations
@@ -142,12 +142,14 @@ This project is configured for deployment on Railway (application) and Supabase 
 - `nixpacks.toml` - Build configuration
 - `Dockerfile` - Alternative Docker deployment
 - `Procfile` - Process definition
+- `src/database/migrations/` - Database migration files
 
 **Important Notes:**
-- ‘‹·¥©≈ Supabase doesn't include TimescaleDB by default (see DEPLOYMENT.md)
+- ‘£‡ Neon includes TimescaleDB support (enable in Neon Console)
 - ‘‹·¥©≈ Railway free tier may sleep - use Pro plan for 24/7 uptime
 - ‘£‡ Always start with `PAPER_TRADING=true`
 - ‘£‡ Never commit `.env` files or API keys
+- ‘£‡ Use pooled connection string from Neon for better performance
 
 ## License
 

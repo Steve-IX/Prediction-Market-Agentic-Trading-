@@ -260,6 +260,13 @@ export class PolymarketWebSocket extends EventEmitter implements IWebSocketClien
   // ============================================
 
   private handleMessage(data: string): void {
+    // Handle non-JSON server responses (like "INVALID OPERATION")
+    if (!data.startsWith('[') && !data.startsWith('{')) {
+      // Log at debug level since these are common for invalid subscriptions
+      this.log.debug('Received non-JSON message from server', { message: data.substring(0, 100) });
+      return;
+    }
+
     try {
       const messages = JSON.parse(data);
       wsMessages.labels(this.platform, 'inbound', 'message').inc();
@@ -271,7 +278,7 @@ export class PolymarketWebSocket extends EventEmitter implements IWebSocketClien
         this.processMessage(message as PolymarketWsMessage);
       }
     } catch (error) {
-      this.log.error('Failed to parse WebSocket message', {
+      this.log.warn('Failed to parse WebSocket message', {
         error: error instanceof Error ? error.message : String(error),
         data: data.substring(0, 200),
       });

@@ -165,9 +165,17 @@ export class PolymarketClient implements IPlatformClient {
         : (Array.isArray(data?.data) ? data.data : (Array.isArray(data?.results) ? data.results : []));
       
       if (!Array.isArray(events) || events.length === 0) {
-        this.log.warn('No events found in Gamma API response', { responseType: Array.isArray(data) ? 'array' : 'object' });
+        this.log.warn('No events found in Gamma API response', { 
+          responseType: Array.isArray(data) ? 'array' : 'object',
+          responseKeys: Array.isArray(data) ? undefined : Object.keys(data || {}),
+        });
         return [];
       }
+
+      this.log.debug('Fetched events from Gamma API', { 
+        eventCount: events.length,
+        eventsWithMarkets: events.filter(e => e?.markets?.length > 0).length,
+      });
 
       // Filter out events without markets and safely map
       const markets = events

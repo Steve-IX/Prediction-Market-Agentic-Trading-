@@ -178,16 +178,25 @@ export class PolymarketClient implements IPlatformClient {
       });
 
       // Filter out events without markets and safely map
-      // Also filter out markets without tokens (required for normalizeMarket)
+      // Markets must have either tokens array OR clobTokenIds+outcomes strings
       const markets = events
         .filter((event): event is GammaEvent & { markets: NonNullable<GammaEvent['markets']> } => 
           event && Array.isArray(event.markets) && event.markets.length > 0
         )
         .flatMap((event) => 
           event.markets
-            .filter((market) => market && Array.isArray(market.tokens) && market.tokens.length > 0)
+            .filter((market) => {
+              if (!market) return false;
+              // Check for tokens array (older format)
+              if (Array.isArray(market.tokens) && market.tokens.length > 0) return true;
+              // Check for JSON string fields (newer format)
+              if (market.clobTokenIds && market.outcomes) return true;
+              return false;
+            })
             .map((market) => this.normalizeMarket(market, event))
-        );
+        )
+        // Filter out any markets that ended up with no outcomes (failed token parsing)
+        .filter((market) => market.outcomes.length > 0);
 
       const durationMs = timer();
       observeApiLatency(this.platform, 'getMarkets', durationMs);
@@ -598,7 +607,10 @@ export class PolymarketClient implements IPlatformClient {
   }
 
   private normalizeMarket(market: GammaMarket, event: GammaEvent): NormalizedMarket {
-    const outcomes: NormalizedOutcome[] = market.tokens.map((token) => {
+    // Build tokens from either the tokens array or the separate JSON string fields
+    const tokens = this.extractTokens(market);
+    
+    const outcomes: NormalizedOutcome[] = tokens.map((token) => {
       const price = parseFloat(token.price || '0.5');
       return {
         id: `${this.platform}:${market.conditionId}:${token.tokenId}`,
@@ -628,6 +640,42 @@ export class PolymarketClient implements IPlatformClient {
       status: market.closed ? MARKET_STATUSES.CLOSED : market.active ? MARKET_STATUSES.ACTIVE : MARKET_STATUSES.SUSPENDED,
       raw: { market, event },
     };
+  }
+
+  /**
+   * Extract tokens from a GammaMarket
+   * The API may return tokens as either:
+   * 1. A tokens array (older format)
+   * 2. Separate JSON string fields: clobTokenIds, outcomes, outcomePrices
+   */
+  private extractTokens(market: GammaMarket): Array<{ tokenId: string; outcome: string; price: string }> {
+    // If tokens array exists and has items, use it
+    if (market.tokens && Array.isArray(market.tokens) && market.tokens.length > 0) {
+      return market.tokens;
+    }
+
+    // Otherwise, parse from JSON string fields
+    try {
+      const tokenIds: string[] = market.clobTokenIds ? JSON.parse(market.clobTokenIds) : [];
+      const outcomes: string[] = market.outcomes ? JSON.parse(market.outcomes) : [];
+      const prices: string[] = market.outcomePrices ? JSON.parse(market.outcomePrices) : [];
+
+      if (tokenIds.length === 0 || outcomes.length === 0) {
+        return [];
+      }
+
+      return tokenIds.map((tokenId, index) => ({
+        tokenId,
+        outcome: outcomes[index] || 'Unknown',
+        price: prices[index] || '0.5',
+      }));
+    } catch (error) {
+      this.log.warn('Failed to parse market tokens', {
+        marketId: market.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return [];
+    }
   }
 
   private normalizeOrderBook(marketId: string, outcomeId: string, orderBook: unknown): OrderBook {

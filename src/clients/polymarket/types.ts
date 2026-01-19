@@ -44,13 +44,17 @@ export interface GammaMarket {
   archived: boolean;
   acceptingOrders: boolean;
   acceptingOrdersTimestamp: string;
-  tokens: GammaToken[];
-  rewards: GammaRewards;
+  // The API returns tokens as separate JSON strings, not as an array
+  tokens?: GammaToken[]; // Optional - some responses may have this
+  clobTokenIds?: string; // JSON string array of token IDs
+  outcomes?: string; // JSON string array like '["Yes", "No"]'
+  outcomePrices?: string; // JSON string array like '["0.5", "0.5"]'
+  rewards?: GammaRewards;
   negRisk: boolean;
-  negRiskMarketId: string;
-  negRiskRequestId: string;
-  icon: string;
-  image: string;
+  negRiskMarketId?: string;
+  negRiskRequestId?: string;
+  icon?: string;
+  image?: string;
 }
 
 export interface GammaToken {

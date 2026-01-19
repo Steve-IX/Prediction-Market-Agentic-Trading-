@@ -1,4 +1,5 @@
 import { getConfig, isPaperTrading, validateCredentials } from './config/index.js';
+import { PLATFORMS } from './config/constants.js';
 import { logger } from './utils/logger.js';
 import { initializeDb, closeDb } from './database/index.js';
 import { PolymarketClient } from './clients/polymarket/index.js';
@@ -6,6 +7,7 @@ import { KalshiClient } from './clients/kalshi/index.js';
 import { OrderManager } from './services/orderManager/index.js';
 import { TradingEngine } from './tradingEngine.js';
 import { getMetrics, getContentType } from './utils/metrics.js';
+import type { AccountBalance } from './clients/shared/interfaces.js';
 import express from 'express';
 
 const log = logger('Main');
@@ -191,6 +193,37 @@ async function main(): Promise<void> {
   // Get balances endpoint
   app.get('/api/balances', async (_req, res) => {
     try {
+      // In paper trading mode, get paper balances from OrderManager
+      if (isPaperTrading() && orderManager.isPaperTrading()) {
+        try {
+          const paperBalances: Record<string, AccountBalance> = {};
+          
+          // Get paper balance for each platform
+          for (const platform of [PLATFORMS.POLYMARKET, PLATFORMS.KALSHI]) {
+            try {
+              paperBalances[platform] = await orderManager.getBalance(platform);
+            } catch {
+              // Platform might not be initialized
+            }
+          }
+
+          res.json({
+            paper: {
+              total: Object.values(paperBalances).reduce((sum, b) => sum + b.total, 0),
+              available: Object.values(paperBalances).reduce((sum, b) => sum + b.available, 0),
+              locked: Object.values(paperBalances).reduce((sum, b) => sum + b.locked, 0),
+              currency: 'USDC',
+            },
+            polymarket: paperBalances[PLATFORMS.POLYMARKET] || { available: 0, locked: 0, total: 0, currency: 'USDC' },
+            kalshi: paperBalances[PLATFORMS.KALSHI] || { available: 0, locked: 0, total: 0, currency: 'USD' },
+          });
+          return;
+        } catch (paperError) {
+          // Fall through to real balances if paper balance fetch fails
+        }
+      }
+
+      // Live trading mode - get real balances
       const [polyBalance, kalshiBalance] = await Promise.allSettled([
         polymarket.isConnected() && config.polymarket.privateKey
           ? polymarket.getBalance()

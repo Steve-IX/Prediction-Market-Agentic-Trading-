@@ -93,11 +93,13 @@ async function main(): Promise<void> {
     }
   }
 
-  // Start metrics server
-  if (config.api.enableMetrics) {
-    const metricsApp = express();
+  // Start API server
+  const app = express();
+  app.use(express.json());
 
-    metricsApp.get('/metrics', async (_req, res) => {
+  // Add metrics endpoint to main API server (for Railway compatibility)
+  if (config.api.enableMetrics) {
+    app.get('/metrics', async (_req, res) => {
       try {
         const metrics = await getMetrics();
         res.set('Content-Type', getContentType());
@@ -106,15 +108,8 @@ async function main(): Promise<void> {
         res.status(500).send('Error collecting metrics');
       }
     });
-
-    metricsApp.listen(config.api.metricsPort, () => {
-      log.info(`Metrics server listening on port ${config.api.metricsPort}`);
-    });
+    log.info('Metrics endpoint available at /metrics on port', config.api.port);
   }
-
-  // Start API server
-  const app = express();
-  app.use(express.json());
 
   // Import API routes
   const { createHealthRouter } = await import('./api/routes/health.js');

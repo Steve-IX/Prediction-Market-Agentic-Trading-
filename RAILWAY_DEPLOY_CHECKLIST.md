@@ -48,7 +48,7 @@ PAPER_TRADING_BALANCE=10000
 
 # API Configuration
 API_PORT=3000
-METRICS_PORT=9090
+# METRICS_PORT=9090  # Optional - metrics now served on same port (3000) at /metrics
 NODE_ENV=production
 LOG_LEVEL=info
 

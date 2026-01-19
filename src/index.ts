@@ -108,7 +108,7 @@ async function main(): Promise<void> {
         res.status(500).send('Error collecting metrics');
       }
     });
-    log.info('Metrics endpoint available at /metrics on port', config.api.port);
+    log.info('Metrics endpoint available at /metrics on port', { port: config.api.port });
   }
 
   // Import API routes

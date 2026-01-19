@@ -156,9 +156,25 @@ export class PolymarketClient implements IPlatformClient {
         throw new Error(`Gamma API error: ${response.status} ${response.statusText}`);
       }
 
-      const events = (await response.json()) as GammaEvent[];
+      const data = (await response.json()) as GammaEvent[] | { data?: GammaEvent[]; results?: GammaEvent[] };
+      
+      // Handle different response structures
+      // The API might return an array directly, or an object with a data property
+      const events: GammaEvent[] = Array.isArray(data) 
+        ? data 
+        : (Array.isArray(data?.data) ? data.data : (Array.isArray(data?.results) ? data.results : []));
+      
+      if (!Array.isArray(events) || events.length === 0) {
+        this.log.warn('No events found in Gamma API response', { responseType: Array.isArray(data) ? 'array' : 'object' });
+        return [];
+      }
 
-      const markets = events.flatMap((event) => event.markets.map((market) => this.normalizeMarket(market, event)));
+      // Filter out events without markets and safely map
+      const markets = events
+        .filter((event): event is GammaEvent & { markets: NonNullable<GammaEvent['markets']> } => 
+          event && Array.isArray(event.markets) && event.markets.length > 0
+        )
+        .flatMap((event) => event.markets.map((market) => this.normalizeMarket(market, event)));
 
       const durationMs = timer();
       observeApiLatency(this.platform, 'getMarkets', durationMs);

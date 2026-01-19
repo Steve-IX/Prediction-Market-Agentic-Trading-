@@ -78,8 +78,6 @@ export function signRSAPSS(
   });
   
   return signature.toString('base64');
-
-  return signature.toString('base64');
 }
 
 /**

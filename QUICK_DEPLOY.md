@@ -18,9 +18,11 @@ DATABASE_URL=postgresql://[USER]:[PASSWORD]@ep-[PROJECT-REF]-pooler.[REGION].aws
 DATABASE_POOL_SIZE=10
 
 # ============================================
-# Polymarket - REPLACE WITH YOUR PRIVATE KEY
+# Polymarket - Add your private key here (DO NOT commit to Git!)
 # ============================================
-POLYMARKET_PRIVATE_KEY=0x[YOUR-ETHEREUM-PRIVATE-KEY-FOR-0x8569d26c60f6ed0454683ba405730aab18ff540e]
+POLYMARKET_PRIVATE_KEY=0x[YOUR-PRIVATE-KEY-HERE]
+# Your Wallet Address: 0xF2B1cf41880985765f2C3135c5F12878f87A5bE6
+# ⚠️ Never commit your private key to Git! Add it only in Railway environment variables.
 POLYMARKET_CHAIN_ID=137
 
 # ============================================

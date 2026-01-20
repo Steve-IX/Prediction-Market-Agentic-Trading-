@@ -1,7 +1,7 @@
 # Quick Monitoring Commands - Copy and paste any command into PowerShell
-# All commands use: https://prediction-trading-production.up.railway.app
+# All commands use: https://web-production-68225.up.railway.app
 
-$url = "https://prediction-trading-production.up.railway.app"
+$url = "https://web-production-68225.up.railway.app"
 
 Write-Host ""
 Write-Host "=== Copy these commands into PowerShell ===" -ForegroundColor Cyan

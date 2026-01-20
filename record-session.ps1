@@ -15,7 +15,7 @@ param(
     
     [string]$Notes = "",
     
-    [string]$Url = "https://prediction-trading-production.up.railway.app"
+    [string]$Url = "https://web-production-68225.up.railway.app"
 )
 
 $sessionFile = "$PSScriptRoot\sessions-local.csv"

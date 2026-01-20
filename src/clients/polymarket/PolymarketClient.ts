@@ -529,7 +529,7 @@ export class PolymarketClient implements IPlatformClient {
           });
 
           // Auto-fallback: Try to derive credentials if provided ones fail
-          if (this.config.apiKey && this.config.apiSecret && this.config.apiPassphrase) {
+          if (this.config.apiKey && this.config.apiSecret && this.config.apiPassphrase && this.signer) {
             try {
               this.log.info('Attempting to derive API credentials automatically...');
               const tempClient = new ClobClient(this.config.host, this.config.chainId, this.signer);

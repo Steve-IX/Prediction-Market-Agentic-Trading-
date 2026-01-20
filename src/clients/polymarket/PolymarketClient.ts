@@ -200,23 +200,68 @@ export class PolymarketClient implements IPlatformClient {
       const tempClient = new ClobClient(this.config.host, this.config.chainId, this.signer);
 
       // Derive or create API credentials
-      const apiCreds = await retry(
-        async () => tempClient.createOrDeriveApiKey(),
-        {
-          maxAttempts: 3,
-          initialDelayMs: 1000,
-          onRetry: (attempt, error) => {
-            this.log.warn(`API key derivation attempt ${attempt} failed`, {
-              error: error instanceof Error ? error.message : String(error),
-            });
+      let apiCreds;
+      try {
+        apiCreds = await retry(
+          async () => {
+            const creds = await tempClient.createOrDeriveApiKey();
+            // Validate that we got valid credentials (SDK may return null/undefined on error)
+            if (!creds || typeof creds !== 'object') {
+              throw new Error('createOrDeriveApiKey returned invalid result (null/undefined)');
+            }
+            if (!creds.key || !creds.secret || !creds.passphrase) {
+              throw new Error('createOrDeriveApiKey returned incomplete credentials (missing key/secret/passphrase)');
+            }
+            return creds;
           },
-        }
-      );
+          {
+            maxAttempts: 3,
+            initialDelayMs: 1000,
+            retryOn: (error) => {
+              // Only retry on network/temporary errors, not permanent failures
+              const msg = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
+              return msg.includes('network') || msg.includes('timeout') || msg.includes('500') || msg.includes('503');
+            },
+            onRetry: (attempt, error) => {
+              this.log.warn(`API key derivation attempt ${attempt} failed`, {
+                error: error instanceof Error ? error.message : String(error),
+              });
+            },
+          }
+        );
+      } catch (error) {
+        const errMsg = error instanceof Error ? error.message : String(error);
+        this.log.error('Failed to derive API credentials', {
+          error: errMsg,
+          walletAddress: this.signer.address,
+          suggestion: 'This may occur if the wallet has not made any trades yet. Try making a small manual trade on polymarket.com first.',
+        });
+        throw new Error(`Unable to derive Polymarket API credentials: ${errMsg}`);
+      }
 
-      this.log.debug('API credentials derived successfully');
+      this.log.info('API credentials derived successfully', {
+        apiKey: apiCreds.key.substring(0, 8) + '...',
+      });
 
       // Initialize trading client with credentials
       this.client = new ClobClient(this.config.host, this.config.chainId, this.signer, apiCreds, signatureType);
+
+      // Verify the derived credentials actually work
+      try {
+        const verifyResult = await this.client.getBalanceAllowance({ asset_type: AssetType.COLLATERAL });
+        const verifyObj = verifyResult as unknown as Record<string, unknown>;
+        if (verifyObj['error'] || verifyObj['status'] === 401) {
+          throw new Error('Derived credentials failed verification (401 Unauthorized)');
+        }
+        this.log.info('Derived credentials verified successfully');
+      } catch (verifyError) {
+        const errMsg = verifyError instanceof Error ? verifyError.message : String(verifyError);
+        this.log.error('Derived credentials failed verification', {
+          error: errMsg,
+          walletAddress: this.signer.address,
+        });
+        throw new Error(`Derived credentials are invalid: ${errMsg}`);
+      }
 
       this.connected = true;
       this.readOnly = false;

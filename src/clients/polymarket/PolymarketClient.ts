@@ -91,74 +91,74 @@ export class PolymarketClient implements IPlatformClient {
         this.client = new ClobClient(this.config.host, this.config.chainId, this.signer, apiCreds, signatureType);
 
         // Verify the credentials work by making a test request
+        // Note: The SDK may log errors to console but not always throw exceptions
+        // We need to check the actual response and catch any errors
+        let verificationPassed = false;
         try {
           const balanceResult = await this.client.getBalanceAllowance({ asset_type: AssetType.COLLATERAL });
           
-          // Double-check: if balanceResult exists and looks valid, credentials are good
-          if (balanceResult && typeof balanceResult === 'object') {
-            this.log.info('L2 API credentials verified successfully');
-            
-            // Credentials verified, mark as connected and return
-            this.connected = true;
-            this.readOnly = false;
-
-            const durationMs = timer();
-            observeApiLatency(this.platform, 'connect', durationMs);
-            recordApiRequest(this.platform, 'connect', 'success');
-
-            this.log.info('Connected to Polymarket CLOB with L2 credentials', {
-              address: this.signer.address,
-              chainId: this.config.chainId,
-              durationMs,
+          // Check if we got a valid response (not null/undefined, has expected structure)
+          if (balanceResult && typeof balanceResult === 'object' && 'balance' in balanceResult) {
+            verificationPassed = true;
+            this.log.info('L2 API credentials verified successfully', {
+              balance: (balanceResult as { balance?: string | number }).balance,
             });
-            return;
           } else {
-            // Unexpected response format, treat as error
+            // Unexpected response format
+            this.log.warn('Balance response format unexpected', { result: balanceResult });
             throw new Error('Unexpected balance response format');
           }
         } catch (verifyError) {
-          // The CLOB SDK logs errors internally, but we need to catch and handle them
+          // Error occurred during verification
+          verificationPassed = false;
           const errMsg = verifyError instanceof Error ? verifyError.message : String(verifyError);
           const errStr = JSON.stringify(verifyError);
           const errStack = verifyError instanceof Error ? verifyError.stack : '';
           const fullErrorString = errStr + ' ' + errStack;
           
-          // Check for 401 Unauthorized - likely wrong wallet
-          // The SDK logs errors to console, but we catch exceptions here
+          // Check for 401 Unauthorized - likely wrong wallet or invalid keys
           if (
             fullErrorString.includes('401') || 
             fullErrorString.includes('Unauthorized') || 
             fullErrorString.includes('Invalid api key') ||
             errMsg.includes('401') ||
-            errMsg.includes('Unauthorized')
+            errMsg.includes('Unauthorized') ||
+            errMsg.includes('Invalid')
           ) {
             this.log.error('L2 API credentials INVALID - 401 Unauthorized detected!', {
               walletFromPrivateKey: this.signer.address,
               error: errMsg,
-              suggestion: 'Credentials were generated for a different wallet. Removing them and auto-deriving new ones...',
+              suggestion: 'Credentials may be invalid or generated for a different wallet. Attempting auto-derive fallback...',
             });
             
-            // Mark for auto-derive fallback - credentials don't match this wallet
+            // Mark for auto-derive fallback
             shouldAutoDerive = true;
-            this.client = null; // Reset client so we can create new one with auto-derived keys
-            this.log.warn('Attempting to auto-derive API credentials instead...');
+            this.client = null; // Reset client
           } else {
-            this.log.warn('Could not verify L2 credentials, proceeding anyway', { error: errMsg });
-            // Non-auth error, proceed with provided credentials
-            this.connected = true;
-            this.readOnly = false;
-
-            const durationMs = timer();
-            observeApiLatency(this.platform, 'connect', durationMs);
-            recordApiRequest(this.platform, 'connect', 'success');
-
-            this.log.info('Connected to Polymarket CLOB with L2 credentials (unverified)', {
-              address: this.signer.address,
-              chainId: this.config.chainId,
-              durationMs,
-            });
-            return;
+            // Non-auth error - might be temporary, proceed anyway
+            this.log.warn('Verification error (non-auth), proceeding anyway', { error: errMsg });
+            verificationPassed = true; // Treat as passed for non-auth errors
           }
+        }
+        
+        // Only mark as connected if verification passed
+        if (verificationPassed && !shouldAutoDerive) {
+          this.connected = true;
+          this.readOnly = false;
+
+          const durationMs = timer();
+          observeApiLatency(this.platform, 'connect', durationMs);
+          recordApiRequest(this.platform, 'connect', 'success');
+
+          this.log.info('Connected to Polymarket CLOB with L2 credentials', {
+            address: this.signer.address,
+            chainId: this.config.chainId,
+            durationMs,
+          });
+          return;
+        } else if (shouldAutoDerive) {
+          // Will fall through to auto-derive logic below
+          this.log.warn('Credentials verification failed, attempting auto-derive...');
         }
       }
       

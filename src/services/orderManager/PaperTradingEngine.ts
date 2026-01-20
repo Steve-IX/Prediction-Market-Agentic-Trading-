@@ -174,6 +174,11 @@ export class PaperTradingEngine extends EventEmitter {
       updatedAt: new Date(),
     };
 
+    // Copy strategyId if present
+    if (order.strategyId) {
+      normalizedOrder.strategyId = order.strategyId;
+    }
+
     // Lock funds for buy orders
     if (order.side === ORDER_SIDES.BUY) {
       balance.available -= orderValue;

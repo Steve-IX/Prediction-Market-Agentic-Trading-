@@ -9,6 +9,7 @@ import { KalshiClient } from './clients/kalshi/KalshiClient.js';
 import { PolymarketWebSocket } from './clients/polymarket/PolymarketWebSocket.js';
 import { KalshiWebSocket } from './clients/kalshi/KalshiWebSocket.js';
 import { MarketDataService, type PriceUpdate } from './services/marketData/index.js';
+import { PricePoller, type PolledPriceUpdate } from './services/pricePolling/index.js';
 import { OrderManager } from './services/orderManager/index.js';
 import { MarketMatcher, type MarketPair } from './services/matching/index.js';
 import { ArbitrageDetector, type ArbitrageOpportunity } from './strategies/arbitrage/ArbitrageDetector.js';
@@ -91,6 +92,7 @@ export class TradingEngine extends EventEmitter {
 
   // Services
   private marketDataService: MarketDataService;
+  private pricePoller: PricePoller;
   private orderManager: OrderManager;
   private marketMatcher: MarketMatcher;
 
@@ -143,6 +145,12 @@ export class TradingEngine extends EventEmitter {
 
     // Create market data service
     this.marketDataService = new MarketDataService(this.polyWs, this.kalshiWs);
+
+    // Create price poller for REST-based price updates (supplements WebSocket)
+    this.pricePoller = new PricePoller(polyClient, {
+      pollIntervalMs: 10000, // Poll every 10 seconds
+      maxMarkets: 200, // Track up to 200 markets
+    });
 
     // Create market matcher
     this.marketMatcher = new MarketMatcher();
@@ -259,6 +267,13 @@ export class TradingEngine extends EventEmitter {
     // Start kill switch monitoring
     this.killSwitch.start();
 
+    // Start price poller (supplements WebSocket with REST polling)
+    const polymarketMarkets = this.markets.get(PLATFORMS.POLYMARKET) ?? [];
+    this.pricePoller.start(polymarketMarkets);
+    this.log.info('Price poller started', { 
+      marketsToTrack: Math.min(polymarketMarkets.length, 200) 
+    });
+
     // Start polling interval as fallback
     if (this.config.scanIntervalMs > 0) {
       this.pollingInterval = setInterval(
@@ -292,6 +307,9 @@ export class TradingEngine extends EventEmitter {
       clearInterval(this.pollingInterval);
       this.pollingInterval = null;
     }
+
+    // Stop price poller
+    this.pricePoller.stop();
 
     // Stop kill switch monitoring
     this.killSwitch.stop();
@@ -369,6 +387,11 @@ export class TradingEngine extends EventEmitter {
 
     this.arbitrageExecutor.on('executionFailed', (error: Error) => {
       this.log.error('Execution failed', { error: error.message });
+    });
+
+    // Price poller events (REST API polling supplements WebSocket)
+    this.pricePoller.on('priceUpdate', (update: PolledPriceUpdate) => {
+      this.onPolledPriceUpdate(update);
     });
 
     // Strategy manager signal events
@@ -454,6 +477,32 @@ export class TradingEngine extends EventEmitter {
     }
 
     await this.scanForOpportunities();
+  }
+
+  /**
+   * Handle polled price updates from REST API
+   * This supplements WebSocket data for markets without activity
+   */
+  private onPolledPriceUpdate(update: PolledPriceUpdate): void {
+    // Track price history for strategies
+    if (update.bestBid !== undefined && update.bestAsk !== undefined) {
+      this.strategyManager.processPriceUpdate(
+        update.marketId,
+        update.midPrice,
+        undefined, // volume not in polled data
+        undefined,
+        undefined
+      );
+
+      // Cache orderbook for strategy analysis
+      this.orderbooks.set(update.outcomeId, {
+        marketId: update.marketId,
+        outcomeId: update.outcomeId,
+        bids: [{ price: update.bestBid, size: 0 }],
+        asks: [{ price: update.bestAsk, size: 0 }],
+        timestamp: update.timestamp,
+      });
+    }
   }
 
   private async scanForOpportunities(): Promise<ArbitrageOpportunity[]> {

@@ -29,16 +29,18 @@ export interface MeanReversionConfig {
   minPriceAge: number; // Min data points needed
 }
 
+// IMPORTANT: Prediction markets have MUCH lower volatility than stocks
+// A 1% move in prediction markets is significant
 const DEFAULT_CONFIG: MeanReversionConfig = {
-  minDeviation: 3, // 3% from VWAP
-  maxDeviation: 15, // 15% max (above this might be real news)
-  rsiOverbought: 75,
-  rsiOversold: 25,
+  minDeviation: 1.0, // Lowered from 3% - even 1% deviation is meaningful in prediction markets
+  maxDeviation: 10, // Lowered from 15%
+  rsiOverbought: 65, // Lowered from 75 - act earlier
+  rsiOversold: 35, // Raised from 25 - act earlier
   maxPositionSize: 100,
   minPositionSize: 10,
-  takeProfitPercent: 3,
-  stopLossPercent: 5,
-  minPriceAge: 20,
+  takeProfitPercent: 2, // Lowered - smaller profits but more frequent
+  stopLossPercent: 3,
+  minPriceAge: 5, // Lowered from 20 - faster signals
 };
 
 /**
@@ -96,36 +98,60 @@ export class MeanReversionStrategy extends EventEmitter {
 
   /**
    * Check if oversold (good to buy)
+   * RELAXED for prediction markets
    */
   private isOversold(stats: PriceStats, deviationVwap: number, deviationSma: number): boolean {
-    // Price significantly below mean
     const avgDeviation = (Math.abs(deviationVwap) + Math.abs(deviationSma)) / 2;
+
+    this.log.debug('Mean reversion OVERSOLD check', {
+      deviationVwap: deviationVwap.toFixed(2),
+      deviationSma: deviationSma.toFixed(2),
+      avgDeviation: avgDeviation.toFixed(2),
+      rsi: stats.rsi.toFixed(0),
+      current: stats.current.toFixed(4),
+      vwap: stats.vwap.toFixed(4),
+      sma20: stats.sma20.toFixed(4),
+    });
+
+    // Price significantly below mean (relaxed)
     if (deviationVwap > -this.config.minDeviation) return false;
     if (avgDeviation > this.config.maxDeviation) return false; // Too extreme
 
-    // RSI confirms oversold
+    // RSI confirms oversold (relaxed threshold)
     if (stats.rsi > this.config.rsiOversold) return false;
 
-    // Price below both VWAP and SMA (double confirmation)
-    if (stats.current > stats.vwap || stats.current > stats.sma20) return false;
+    // Relaxed: only need to be below VWAP OR SMA (not both)
+    if (stats.current > stats.vwap && stats.current > stats.sma20) return false;
 
     return true;
   }
 
   /**
    * Check if overbought (good to sell)
+   * RELAXED for prediction markets
    */
   private isOverbought(stats: PriceStats, deviationVwap: number, deviationSma: number): boolean {
-    // Price significantly above mean
     const avgDeviation = (Math.abs(deviationVwap) + Math.abs(deviationSma)) / 2;
+
+    this.log.debug('Mean reversion OVERBOUGHT check', {
+      deviationVwap: deviationVwap.toFixed(2),
+      deviationSma: deviationSma.toFixed(2),
+      avgDeviation: avgDeviation.toFixed(2),
+      rsi: stats.rsi.toFixed(0),
+      current: stats.current.toFixed(4),
+      vwap: stats.vwap.toFixed(4),
+      sma20: stats.sma20.toFixed(4),
+    });
+
+    // Price significantly above mean (relaxed)
     if (deviationVwap < this.config.minDeviation) return false;
     if (avgDeviation > this.config.maxDeviation) return false; // Too extreme
 
-    // RSI confirms overbought
+    // RSI confirms overbought (relaxed threshold)
     if (stats.rsi < this.config.rsiOverbought) return false;
 
-    // Price above both VWAP and SMA (double confirmation)
-    if (stats.current < stats.vwap || stats.current < stats.sma20) return false;
+    // Relaxed: only need to be above VWAP OR SMA (not both)
+    if (stats.current < stats.vwap && stats.current < stats.sma20) return false;
 
     return true;
   }

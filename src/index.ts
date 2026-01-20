@@ -363,6 +363,141 @@ async function main(): Promise<void> {
     }
   });
 
+  // ============================================
+  // Debug Endpoints (NEW)
+  // ============================================
+
+  // Get detailed strategy debug info
+  app.get('/api/trading/debug', async (_req, res): Promise<void> => {
+    if (!tradingEngine) {
+      res.status(404).json({ error: 'Trading engine not initialized' });
+      return;
+    }
+
+    try {
+      const state = tradingEngine.getState();
+      const markets = tradingEngine.getMarkets();
+      
+      // Get market counts by platform
+      const polymarketMarkets = markets.get(PLATFORMS.POLYMARKET) ?? [];
+      const kalshiMarkets = markets.get(PLATFORMS.KALSHI) ?? [];
+      
+      // Analyze a sample of markets for probability sum opportunities
+      const probabilitySumAnalysis: Array<{
+        title: string;
+        yesAsk: number | undefined;
+        noAsk: number | undefined;
+        sum: number | undefined;
+        deviation: string;
+      }> = [];
+      
+      for (const market of polymarketMarkets.slice(0, 20)) {
+        if (market.outcomes.length === 2) {
+          const yesOutcome = market.outcomes.find(o => o.type === 'yes');
+          const noOutcome = market.outcomes.find(o => o.type === 'no');
+          if (yesOutcome && noOutcome && yesOutcome.bestAsk && noOutcome.bestAsk) {
+            const sum = yesOutcome.bestAsk + noOutcome.bestAsk;
+            probabilitySumAnalysis.push({
+              title: market.title.substring(0, 50),
+              yesAsk: yesOutcome.bestAsk,
+              noAsk: noOutcome.bestAsk,
+              sum,
+              deviation: ((sum - 1) * 100).toFixed(3) + '%',
+            });
+          }
+        }
+      }
+      
+      // Sort by deviation from 1.0
+      probabilitySumAnalysis.sort((a, b) => {
+        const devA = Math.abs((a.sum ?? 1) - 1);
+        const devB = Math.abs((b.sum ?? 1) - 1);
+        return devB - devA;
+      });
+
+      res.json({
+        engineState: state,
+        config: {
+          paperTrading: isPaperTrading(),
+          strategies: config.strategies,
+          features: config.features,
+        },
+        marketCounts: {
+          polymarket: polymarketMarkets.length,
+          kalshi: kalshiMarkets.length,
+          binaryMarkets: polymarketMarkets.filter(m => m.outcomes.length === 2).length,
+        },
+        probabilitySumAnalysis: probabilitySumAnalysis.slice(0, 10),
+        topMispricing: probabilitySumAnalysis.length > 0 ? probabilitySumAnalysis[0] : null,
+        timestamp: new Date().toISOString(),
+      });
+    } catch (error) {
+      res.status(500).json({
+        error: 'Debug info error',
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
+  // Get all markets with their current prices
+  app.get('/api/trading/markets/analysis', async (_req, res): Promise<void> => {
+    if (!tradingEngine) {
+      res.status(404).json({ error: 'Trading engine not initialized' });
+      return;
+    }
+
+    try {
+      const markets = tradingEngine.getMarkets();
+      const polymarketMarkets = markets.get(PLATFORMS.POLYMARKET) ?? [];
+      
+      const analysis = polymarketMarkets
+        .filter(m => m.outcomes.length === 2 && m.isActive)
+        .map(market => {
+          const yesOutcome = market.outcomes.find(o => o.type === 'yes');
+          const noOutcome = market.outcomes.find(o => o.type === 'no');
+          
+          const yesAsk = yesOutcome?.bestAsk ?? 0;
+          const noAsk = noOutcome?.bestAsk ?? 0;
+          const yesBid = yesOutcome?.bestBid ?? 0;
+          const noBid = noOutcome?.bestBid ?? 0;
+          
+          const sumOfAsks = yesAsk + noAsk;
+          const sumOfBids = yesBid + noBid;
+          
+          return {
+            id: market.externalId,
+            title: market.title.substring(0, 60),
+            yesAsk,
+            noAsk,
+            yesBid,
+            noBid,
+            sumOfAsks: sumOfAsks.toFixed(4),
+            sumOfBids: sumOfBids.toFixed(4),
+            askMispricing: ((1 - sumOfAsks) * 100).toFixed(3) + '%',
+            bidMispricing: ((sumOfBids - 1) * 100).toFixed(3) + '%',
+            isArbOpportunity: sumOfAsks < 0.995, // Less than $0.995 for both = profit
+            spread: ((yesAsk - yesBid) * 100).toFixed(2) + '%',
+          };
+        })
+        .sort((a, b) => {
+          // Sort by arbitrage opportunity (lowest sum first)
+          return parseFloat(a.sumOfAsks) - parseFloat(b.sumOfAsks);
+        });
+
+      res.json({
+        totalMarkets: analysis.length,
+        arbOpportunities: analysis.filter(m => m.isArbOpportunity).length,
+        markets: analysis.slice(0, 50),
+        timestamp: new Date().toISOString(),
+      });
+    } catch (error) {
+      res.status(500).json({
+        error: 'Market analysis error',
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
   app.listen(config.api.port, () => {
     log.info(`API server listening on port ${config.api.port}`);
   });
@@ -416,6 +551,9 @@ async function main(): Promise<void> {
     tradingStop: 'POST /api/trading/stop',
     tradingScan: 'POST /api/trading/scan',
     killSwitch: 'POST /api/kill-switch',
+    // New debug endpoints
+    tradingDebug: 'GET /api/trading/debug',
+    marketAnalysis: 'GET /api/trading/markets/analysis',
   });
 }
 

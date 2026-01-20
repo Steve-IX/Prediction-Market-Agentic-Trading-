@@ -48,17 +48,19 @@ export interface MomentumConfig {
   minLiquidity: number; // Minimum orderbook depth
 }
 
+// IMPORTANT: Prediction markets have MUCH lower volatility than stocks
+// These thresholds are calibrated for prediction market dynamics
 const DEFAULT_CONFIG: MomentumConfig = {
-  minMomentum: 0.4,
-  minChangePercent: 2,
-  rsiOverbought: 70,
-  rsiOversold: 30,
+  minMomentum: 0.15, // Lowered from 0.4 - prediction markets move slowly
+  minChangePercent: 0.5, // Lowered from 2% - even 0.5% moves are significant in prediction markets
+  rsiOverbought: 65, // Lowered from 70 - act earlier
+  rsiOversold: 35, // Raised from 30 - act earlier
   maxPositionSize: 100,
   minPositionSize: 10,
-  takeProfitPercent: 5,
-  stopLossPercent: 3,
-  minVolume: 100,
-  minLiquidity: 50,
+  takeProfitPercent: 3, // Lowered - smaller but more frequent profits
+  stopLossPercent: 2,
+  minVolume: 10, // Lowered from 100 - prediction markets have lower volume
+  minLiquidity: 10, // Lowered from 50
 };
 
 /**
@@ -110,22 +112,36 @@ export class MomentumStrategy extends EventEmitter {
 
   /**
    * Check if we should buy (bullish signal)
+   * RELAXED for prediction markets - they move much less than stocks
    */
   private shouldBuy(stats: PriceStats): boolean {
-    // Strong upward momentum
+    // Log all conditions for debugging
+    const conditions = {
+      momentum: stats.momentum >= this.config.minMomentum,
+      changePercent: stats.changePercent >= this.config.minChangePercent,
+      trend: stats.trend === 'up' || stats.trend === 'neutral', // Accept neutral too
+      rsi: stats.rsi <= this.config.rsiOverbought,
+      aboveSma: stats.current >= stats.sma5 * 0.99, // Allow small tolerance
+    };
+
+    this.log.debug('Momentum BUY check', {
+      momentum: stats.momentum.toFixed(3),
+      changePercent: stats.changePercent.toFixed(2),
+      trend: stats.trend,
+      rsi: stats.rsi.toFixed(0),
+      current: stats.current.toFixed(4),
+      sma5: stats.sma5.toFixed(4),
+      conditions,
+    });
+
+    // Check conditions with relaxed criteria
     if (stats.momentum < this.config.minMomentum) return false;
-
-    // Price change confirms momentum
     if (stats.changePercent < this.config.minChangePercent) return false;
-
-    // Trend is up
-    if (stats.trend !== 'up') return false;
-
-    // RSI not overbought (avoid buying at peak)
+    // Relaxed: accept 'up' or 'neutral' trend (prediction markets often neutral)
+    if (stats.trend === 'down') return false;
     if (stats.rsi > this.config.rsiOverbought) return false;
-
-    // Price above short-term MA (confirmation)
-    if (stats.current < stats.sma5) return false;
+    // Relaxed: small tolerance for SMA comparison
+    if (stats.current < stats.sma5 * 0.99) return false;
 
     // Volume confirms move (optional)
     if (stats.volumeSpike) {
@@ -137,22 +153,36 @@ export class MomentumStrategy extends EventEmitter {
 
   /**
    * Check if we should sell (bearish signal)
+   * RELAXED for prediction markets
    */
   private shouldSell(stats: PriceStats): boolean {
-    // Strong downward momentum
+    // Log all conditions for debugging
+    const conditions = {
+      momentum: stats.momentum <= -this.config.minMomentum,
+      changePercent: stats.changePercent <= -this.config.minChangePercent,
+      trend: stats.trend === 'down' || stats.trend === 'neutral',
+      rsi: stats.rsi >= this.config.rsiOversold,
+      belowSma: stats.current <= stats.sma5 * 1.01,
+    };
+
+    this.log.debug('Momentum SELL check', {
+      momentum: stats.momentum.toFixed(3),
+      changePercent: stats.changePercent.toFixed(2),
+      trend: stats.trend,
+      rsi: stats.rsi.toFixed(0),
+      current: stats.current.toFixed(4),
+      sma5: stats.sma5.toFixed(4),
+      conditions,
+    });
+
+    // Check conditions with relaxed criteria
     if (stats.momentum > -this.config.minMomentum) return false;
-
-    // Price change confirms momentum
     if (stats.changePercent > -this.config.minChangePercent) return false;
-
-    // Trend is down
-    if (stats.trend !== 'down') return false;
-
-    // RSI not oversold (avoid selling at bottom)
+    // Relaxed: accept 'down' or 'neutral' trend
+    if (stats.trend === 'up') return false;
     if (stats.rsi < this.config.rsiOversold) return false;
-
-    // Price below short-term MA (confirmation)
-    if (stats.current > stats.sma5) return false;
+    // Relaxed: small tolerance for SMA comparison
+    if (stats.current > stats.sma5 * 1.01) return false;
 
     return true;
   }

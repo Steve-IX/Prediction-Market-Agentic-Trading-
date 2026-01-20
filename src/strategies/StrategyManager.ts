@@ -4,6 +4,8 @@ import { PriceHistoryTracker, type PriceStats } from '../services/priceHistory/P
 import { MomentumStrategy, type TradingSignal } from './momentum/MomentumStrategy.js';
 import { MeanReversionStrategy } from './momentum/MeanReversionStrategy.js';
 import { OrderbookImbalanceStrategy } from './momentum/OrderbookImbalanceStrategy.js';
+import { ProbabilitySumStrategy } from './prediction/ProbabilitySumStrategy.js';
+import { EndgameStrategy } from './prediction/EndgameStrategy.js';
 import { logger, type Logger } from '../utils/logger.js';
 
 /**
@@ -13,6 +15,8 @@ export interface StrategyManagerConfig {
   enableMomentum: boolean;
   enableMeanReversion: boolean;
   enableOrderbookImbalance: boolean;
+  enableProbabilitySum: boolean; // NEW: Prediction market arbitrage
+  enableEndgame: boolean; // NEW: Near-resolution high-probability trading
   maxConcurrentSignals: number;
   signalCooldownMs: number;
 }
@@ -21,13 +25,22 @@ const DEFAULT_CONFIG: StrategyManagerConfig = {
   enableMomentum: true,
   enableMeanReversion: true,
   enableOrderbookImbalance: true,
-  maxConcurrentSignals: 3,
-  signalCooldownMs: 30000, // 30 seconds between signals on same market
+  enableProbabilitySum: true, // NEW: Enabled by default - most reliable strategy
+  enableEndgame: true, // NEW: Enabled by default
+  maxConcurrentSignals: 5, // Increased from 3
+  signalCooldownMs: 15000, // Reduced from 30 seconds to 15 seconds
 };
 
 /**
  * Strategy Manager
  * Coordinates multiple trading strategies and generates unified signals
+ * 
+ * STRATEGIES:
+ * 1. ProbabilitySum - Arbitrage when YES + NO != $1 (most reliable)
+ * 2. Endgame - Buy high probability outcomes near resolution
+ * 3. Momentum - Follow price trends
+ * 4. MeanReversion - Fade extreme moves
+ * 5. OrderbookImbalance - Trade on bid/ask volume imbalance
  */
 export class StrategyManager extends EventEmitter {
   private log: Logger;
@@ -36,27 +49,53 @@ export class StrategyManager extends EventEmitter {
   // Price tracking
   private priceTracker: PriceHistoryTracker;
 
-  // Strategies
+  // Technical Analysis Strategies
   private momentumStrategy: MomentumStrategy;
   private meanReversionStrategy: MeanReversionStrategy;
   private orderbookImbalanceStrategy: OrderbookImbalanceStrategy;
 
+  // Prediction Market-Specific Strategies (NEW)
+  private probabilitySumStrategy: ProbabilitySumStrategy;
+  private endgameStrategy: EndgameStrategy;
+
   // Signal management
   private signalCooldowns: Map<string, Date> = new Map();
+  
+  // Debug tracking
+  private lastScanStats: {
+    marketsScanned: number;
+    marketsWithPriceHistory: number;
+    signalsGenerated: number;
+    timestamp: Date;
+  } = { marketsScanned: 0, marketsWithPriceHistory: 0, signalsGenerated: 0, timestamp: new Date() };
 
   constructor(config?: Partial<StrategyManagerConfig>) {
     super();
     this.log = logger('StrategyManager');
     this.config = { ...DEFAULT_CONFIG, ...config };
 
-    // Initialize components
-    this.priceTracker = new PriceHistoryTracker(1000, 1000);
+    // Initialize components (reduced interval for faster data collection)
+    this.priceTracker = new PriceHistoryTracker(1000, 500);
+    
+    // Technical analysis strategies
     this.momentumStrategy = new MomentumStrategy();
     this.meanReversionStrategy = new MeanReversionStrategy();
     this.orderbookImbalanceStrategy = new OrderbookImbalanceStrategy();
+    
+    // NEW: Prediction market-specific strategies
+    this.probabilitySumStrategy = new ProbabilitySumStrategy();
+    this.endgameStrategy = new EndgameStrategy();
 
     // Forward signals from strategies
     this.setupEventForwarding();
+    
+    this.log.info('Strategy manager initialized', {
+      enableMomentum: this.config.enableMomentum,
+      enableMeanReversion: this.config.enableMeanReversion,
+      enableOrderbookImbalance: this.config.enableOrderbookImbalance,
+      enableProbabilitySum: this.config.enableProbabilitySum,
+      enableEndgame: this.config.enableEndgame,
+    });
   }
 
   /**
@@ -86,11 +125,43 @@ export class StrategyManager extends EventEmitter {
     // Get price stats
     const stats = this.priceTracker.getStats(market.externalId, 60);
 
+    // === PREDICTION MARKET-SPECIFIC STRATEGIES (highest priority) ===
+    
+    // Run probability sum strategy (doesn't need price history!)
+    if (this.config.enableProbabilitySum) {
+      const signal = this.probabilitySumStrategy.analyze(market);
+      if (signal) {
+        signals.push(signal);
+        this.log.info('ProbabilitySum signal generated', {
+          market: market.title.substring(0, 40),
+          confidence: signal.confidence.toFixed(2),
+        });
+      }
+    }
+
+    // Run endgame strategy (doesn't need price history!)
+    if (this.config.enableEndgame) {
+      const signal = this.endgameStrategy.analyze(market);
+      if (signal) {
+        signals.push(signal);
+        this.log.info('Endgame signal generated', {
+          market: market.title.substring(0, 40),
+          confidence: signal.confidence.toFixed(2),
+        });
+      }
+    }
+
+    // === TECHNICAL ANALYSIS STRATEGIES (need price history) ===
+
     // Run momentum strategy
     if (this.config.enableMomentum && stats) {
       const signal = this.momentumStrategy.analyze(market, stats);
       if (signal) {
         signals.push(signal);
+        this.log.info('Momentum signal generated', {
+          market: market.title.substring(0, 40),
+          confidence: signal.confidence.toFixed(2),
+        });
       }
     }
 
@@ -99,6 +170,10 @@ export class StrategyManager extends EventEmitter {
       const signal = this.meanReversionStrategy.analyze(market, stats);
       if (signal) {
         signals.push(signal);
+        this.log.info('MeanReversion signal generated', {
+          market: market.title.substring(0, 40),
+          confidence: signal.confidence.toFixed(2),
+        });
       }
     }
 
@@ -107,6 +182,10 @@ export class StrategyManager extends EventEmitter {
       const signal = this.orderbookImbalanceStrategy.analyze(market, orderbook);
       if (signal) {
         signals.push(signal);
+        this.log.info('OrderbookImbalance signal generated', {
+          market: market.title.substring(0, 40),
+          confidence: signal.confidence.toFixed(2),
+        });
       }
     }
 
@@ -126,11 +205,35 @@ export class StrategyManager extends EventEmitter {
    */
   scanMarkets(markets: NormalizedMarket[], orderbooks?: Map<string, OrderBook>): TradingSignal[] {
     const allSignals: TradingSignal[] = [];
+    let marketsWithPriceHistory = 0;
 
     for (const market of markets) {
       const orderbook = orderbooks?.get(market.externalId);
       const signals = this.analyzeMarket(market, orderbook);
       allSignals.push(...signals);
+      
+      // Track price history availability
+      if (this.priceTracker.getStats(market.externalId, 60) !== null) {
+        marketsWithPriceHistory++;
+      }
+    }
+
+    // Update debug stats
+    this.lastScanStats = {
+      marketsScanned: markets.length,
+      marketsWithPriceHistory,
+      signalsGenerated: allSignals.length,
+      timestamp: new Date(),
+    };
+
+    // Log scan summary periodically (every 10th scan or when signals found)
+    if (allSignals.length > 0 || Math.random() < 0.1) {
+      this.log.info('Market scan summary', {
+        marketsScanned: markets.length,
+        marketsWithPriceHistory,
+        signalsGenerated: allSignals.length,
+        strategies: allSignals.length > 0 ? [...new Set(allSignals.map(s => s.strategy))].join(', ') : 'none',
+      });
     }
 
     // Sort by confidence and limit
@@ -164,6 +267,8 @@ export class StrategyManager extends EventEmitter {
    * Mark a signal as executed (removes from active)
    */
   markSignalExecuted(signal: TradingSignal): void {
+    this.probabilitySumStrategy.clearSignal(signal.marketId);
+    this.endgameStrategy.clearSignal(signal.marketId);
     this.momentumStrategy.clearSignal(signal.marketId);
     this.meanReversionStrategy.clearSignal(signal.marketId);
     this.orderbookImbalanceStrategy.clearSignal(signal.marketId);
@@ -182,10 +287,26 @@ export class StrategyManager extends EventEmitter {
    */
   getAllActiveSignals(): TradingSignal[] {
     return [
+      ...this.probabilitySumStrategy.getActiveSignals(),
+      ...this.endgameStrategy.getActiveSignals(),
       ...this.momentumStrategy.getActiveSignals(),
       ...this.meanReversionStrategy.getActiveSignals(),
       ...this.orderbookImbalanceStrategy.getActiveSignals(),
     ];
+  }
+
+  /**
+   * Get last scan statistics (for debugging)
+   */
+  getLastScanStats(): typeof this.lastScanStats {
+    return { ...this.lastScanStats };
+  }
+
+  /**
+   * Get price tracker summary (for debugging)
+   */
+  getPriceTrackerSummary(): Array<{ marketId: string; pointCount: number; hasStats: boolean }> {
+    return this.priceTracker.getTrackedMarketsSummary();
   }
 
   /**
@@ -211,10 +332,18 @@ export class StrategyManager extends EventEmitter {
     // Forward significant price moves
     this.priceTracker.on('significantMove', (data) => {
       this.emit('significantMove', data);
-      this.log.debug('Significant price move detected', data);
+      this.log.info('Significant price move detected', data);
     });
 
     // Forward strategy signals
+    this.probabilitySumStrategy.on('signal', (signal) => {
+      this.emit('signal', signal);
+    });
+
+    this.endgameStrategy.on('signal', (signal) => {
+      this.emit('signal', signal);
+    });
+
     this.momentumStrategy.on('signal', (signal) => {
       this.emit('signal', signal);
     });
@@ -253,6 +382,8 @@ export class StrategyManager extends EventEmitter {
   }
 
   private cleanExpiredSignals(): void {
+    this.probabilitySumStrategy.clearExpiredSignals();
+    this.endgameStrategy.clearExpiredSignals();
     this.momentumStrategy.clearExpiredSignals();
     this.meanReversionStrategy.clearExpiredSignals();
     this.orderbookImbalanceStrategy.clearExpiredSignals();

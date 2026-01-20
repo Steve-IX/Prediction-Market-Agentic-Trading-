@@ -38,15 +38,16 @@ export interface OrderbookImbalanceConfig {
   maxSpreadPercent: number; // Maximum bid-ask spread
 }
 
+// IMPORTANT: Prediction markets have lower volume - adjust thresholds
 const DEFAULT_CONFIG: OrderbookImbalanceConfig = {
-  minImbalanceRatio: 2.0, // 2x more on one side
+  minImbalanceRatio: 1.5, // Lowered from 2.0 - 1.5x imbalance is significant in prediction markets
   depthLevels: 5,
   maxPositionSize: 100,
   minPositionSize: 10,
-  takeProfitPercent: 2,
-  stopLossPercent: 3,
-  minTotalVolume: 100,
-  maxSpreadPercent: 5,
+  takeProfitPercent: 1.5, // Lowered for faster exits
+  stopLossPercent: 2,
+  minTotalVolume: 10, // Lowered significantly from 100 - prediction markets have less volume
+  maxSpreadPercent: 10, // Increased from 5 - prediction markets can have wider spreads
 };
 
 /**
@@ -98,6 +99,16 @@ export class OrderbookImbalanceStrategy extends EventEmitter {
     this.lastImbalance.set(market.externalId, {
       ratio: metrics.imbalanceRatio,
       timestamp: new Date(),
+    });
+
+    this.log.debug('Orderbook imbalance check', {
+      market: market.title.substring(0, 40),
+      imbalanceRatio: metrics.imbalanceRatio.toFixed(2),
+      bidVolume: metrics.bidVolume.toFixed(0),
+      askVolume: metrics.askVolume.toFixed(0),
+      totalVolume: metrics.totalVolume.toFixed(0),
+      spreadPercent: metrics.spreadPercent.toFixed(2),
+      minRatio: this.config.minImbalanceRatio,
     });
 
     // Check for buy signal (bid imbalance - buying pressure)

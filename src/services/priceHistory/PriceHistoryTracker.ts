@@ -41,10 +41,33 @@ export class PriceHistoryTracker extends EventEmitter {
   private maxHistorySize: number;
   private updateInterval: number; // ms between price captures
 
-  constructor(maxHistorySize = 1000, updateIntervalMs = 1000) {
+  // CHANGED: Reduced default interval from 1000ms to 500ms for faster data collection
+  constructor(maxHistorySize = 1000, updateIntervalMs = 500) {
     super();
     this.maxHistorySize = maxHistorySize;
     this.updateInterval = updateIntervalMs;
+  }
+
+  /**
+   * Get data point count for a market (for debugging)
+   */
+  getPointCount(marketId: string): number {
+    return this.history.get(marketId)?.length ?? 0;
+  }
+
+  /**
+   * Get all tracked market stats summary (for debugging)
+   */
+  getTrackedMarketsSummary(): Array<{ marketId: string; pointCount: number; hasStats: boolean }> {
+    const summary: Array<{ marketId: string; pointCount: number; hasStats: boolean }> = [];
+    for (const [marketId, points] of this.history) {
+      summary.push({
+        marketId,
+        pointCount: points.length,
+        hasStats: points.length >= 3,
+      });
+    }
+    return summary;
   }
 
   /**
@@ -110,17 +133,20 @@ export class PriceHistoryTracker extends EventEmitter {
 
   /**
    * Get price statistics for a market
+   * OPTIMIZED: Reduced minimum data points from 5 to 3 for faster signal generation
    */
   getStats(marketId: string, windowMinutes = 60): PriceStats | null {
     const points = this.history.get(marketId);
-    if (!points || points.length < 5) return null;
+    // CHANGED: Reduced from 5 to 3 minimum points for faster initial signals
+    if (!points || points.length < 3) return null;
 
     const now = new Date();
     const windowStart = new Date(now.getTime() - windowMinutes * 60 * 1000);
 
     // Filter to window
     const windowPoints = points.filter((p) => p.timestamp >= windowStart);
-    if (windowPoints.length < 5) return null;
+    // CHANGED: Reduced from 5 to 3 minimum points
+    if (windowPoints.length < 3) return null;
 
     const prices = windowPoints.map((p) => p.price);
     const volumes = windowPoints.map((p) => p.volume ?? 0);
@@ -278,7 +304,8 @@ export class PriceHistoryTracker extends EventEmitter {
   }
 
   private calculateMomentum(prices: number[]): number {
-    if (prices.length < 10) return 0;
+    // CHANGED: Reduced from 10 to 3 minimum for faster signals
+    if (prices.length < 3) return 0;
 
     // Linear regression slope normalized to -1 to 1
     const n = Math.min(prices.length, 20);

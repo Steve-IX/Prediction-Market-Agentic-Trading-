@@ -151,11 +151,15 @@ export class TradingEngine extends EventEmitter {
     this.arbitrageDetector = new ArbitrageDetector();
     this.arbitrageExecutor = new ArbitrageExecutor(this.orderManager);
     
-    // Create new strategy components
+    // Create new strategy components with all strategy options
     this.strategyManager = new StrategyManager({
+      // Technical analysis strategies
       enableMomentum: this.appConfig.features.enableMomentumStrategy,
       enableMeanReversion: this.appConfig.features.enableMeanReversionStrategy,
       enableOrderbookImbalance: this.appConfig.features.enableOrderbookImbalanceStrategy,
+      // Prediction market-specific strategies (NEW)
+      enableProbabilitySum: this.appConfig.features.enableProbabilitySumStrategy,
+      enableEndgame: this.appConfig.features.enableEndgameStrategy,
       signalCooldownMs: this.appConfig.strategies.signalCooldownMs,
     });
     this.signalExecutor = new SignalExecutor(this.orderManager);

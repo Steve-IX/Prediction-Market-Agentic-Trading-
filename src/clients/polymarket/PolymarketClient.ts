@@ -517,7 +517,7 @@ export class PolymarketClient implements IPlatformClient {
       if (error && typeof error === 'object' && 'status' in error) {
         const statusError = error as { status?: number; statusText?: string; data?: unknown };
         if (statusError.status === 401) {
-          this.log.error('Authentication failed (401 Unauthorized)', {
+          this.log.error('Authentication failed (401 Unauthorized) - provided L2 credentials invalid', {
             status: statusError.status,
             statusText: statusError.statusText,
             data: statusError.data,
@@ -525,8 +525,54 @@ export class PolymarketClient implements IPlatformClient {
             hasApiKey: !!this.config.apiKey,
             hasApiSecret: !!this.config.apiSecret,
             hasApiPassphrase: !!this.config.apiPassphrase,
-            hint: 'Verify POLYMARKET_API_KEY, POLYMARKET_API_SECRET, and POLYMARKET_API_PASSPHRASE in Railway match your Polymarket account',
+            hint: 'Provided L2 API credentials are invalid. Attempting to derive new credentials automatically...',
           });
+
+          // Auto-fallback: Try to derive credentials if provided ones fail
+          if (this.config.apiKey && this.config.apiSecret && this.config.apiPassphrase) {
+            try {
+              this.log.info('Attempting to derive API credentials automatically...');
+              const tempClient = new ClobClient(this.config.host, this.config.chainId, this.signer);
+              const signatureType = this.mapSignatureType(this.config.signatureType);
+              
+              const derivedCreds = await retry(
+                async () => tempClient.createOrDeriveApiKey(),
+                {
+                  maxAttempts: 3,
+                  initialDelayMs: 1000,
+                  onRetry: (attempt, error) => {
+                    this.log.warn(`API key derivation attempt ${attempt} failed`, {
+                      error: error instanceof Error ? error.message : String(error),
+                    });
+                  },
+                }
+              );
+
+              // Reinitialize client with derived credentials
+              this.client = new ClobClient(this.config.host, this.config.chainId, this.signer, derivedCreds, signatureType);
+              this.log.info('Successfully derived and applied new API credentials');
+
+              // Retry balance request with new credentials
+              const balanceData = await this.client.getBalanceAllowance({
+                asset_type: AssetType.COLLATERAL,
+              });
+
+              const balance = balanceData.balance;
+              const available = typeof balance === 'string' ? parseFloat(balance) / 1e6 : 0;
+
+              recordApiRequest(this.platform, 'getBalance', 'success');
+              return {
+                available,
+                locked: 0,
+                total: available,
+                currency: 'USDC',
+              };
+            } catch (deriveError) {
+              this.log.error('Failed to derive API credentials as fallback', {
+                error: deriveError instanceof Error ? deriveError.message : String(deriveError),
+              });
+            }
+          }
         } else {
           this.log.error('Failed to get balance', {
             status: statusError.status,

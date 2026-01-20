@@ -266,14 +266,22 @@ export class StrategyManager extends EventEmitter {
       timestamp: new Date(),
     };
 
-    // Log scan summary periodically (every 10th scan or when signals found)
-    if (allSignals.length > 0 || Math.random() < 0.1) {
+    // Log scan summary periodically (every 30th scan or when signals found)
+    if (allSignals.length > 0 || Math.random() < 0.033) {
       this.log.info('Market scan summary', {
         marketsScanned: markets.length,
         marketsWithPriceHistory,
         signalsGenerated: allSignals.length,
         strategies: allSignals.length > 0 ? [...new Set(allSignals.map(s => s.strategy))].join(', ') : 'none',
       });
+      
+      // Debug: Log sample price stats when no signals (every 5 minutes roughly)
+      if (allSignals.length === 0 && marketsWithPriceHistory > 0 && Math.random() < 0.1) {
+        const sampleStats = this.getSamplePriceStats(markets, 3);
+        if (sampleStats.length > 0) {
+          this.log.info('Sample price stats (debug)', { samples: sampleStats });
+        }
+      }
     }
 
     // Sort by confidence and limit
@@ -347,6 +355,42 @@ export class StrategyManager extends EventEmitter {
    */
   getPriceTrackerSummary(): Array<{ marketId: string; pointCount: number; hasStats: boolean }> {
     return this.priceTracker.getTrackedMarketsSummary();
+  }
+
+  /**
+   * Get sample price stats for debugging
+   */
+  private getSamplePriceStats(markets: NormalizedMarket[], count: number): Array<{
+    title: string;
+    momentum: number;
+    changePercent: number;
+    trend: string;
+    rsi: number;
+  }> {
+    const samples: Array<{
+      title: string;
+      momentum: number;
+      changePercent: number;
+      trend: string;
+      rsi: number;
+    }> = [];
+
+    for (const market of markets) {
+      if (samples.length >= count) break;
+      
+      const stats = this.priceTracker.getStats(market.externalId, 60);
+      if (stats) {
+        samples.push({
+          title: market.title.substring(0, 40),
+          momentum: parseFloat(stats.momentum.toFixed(3)),
+          changePercent: parseFloat(stats.changePercent.toFixed(2)),
+          trend: stats.trend,
+          rsi: parseFloat(stats.rsi.toFixed(0)),
+        });
+      }
+    }
+
+    return samples;
   }
 
   /**

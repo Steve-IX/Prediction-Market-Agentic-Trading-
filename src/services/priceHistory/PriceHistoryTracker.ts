@@ -115,11 +115,12 @@ export class PriceHistoryTracker extends EventEmitter {
     }
 
     // Emit event for significant price changes
-    if (points.length >= 2) {
+    // Only emit if we have enough history and the move is real (not YES/NO swap)
+    if (points.length >= 3) {
       const prevPrice = points[points.length - 2]!.price;
       const changePct = Math.abs((price - prevPrice) / prevPrice) * 100;
-      if (changePct >= 1) {
-        // 1% move
+      // Ignore huge swings (likely YES/NO confusion) - real moves are < 20%
+      if (changePct >= 2 && changePct < 20) {
         this.emit('significantMove', {
           marketId,
           price,

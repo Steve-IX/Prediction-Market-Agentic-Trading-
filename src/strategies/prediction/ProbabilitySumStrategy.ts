@@ -105,18 +105,8 @@ export class ProbabilitySumStrategy extends EventEmitter {
       timestamp: new Date()
     });
 
-    // Calculate mispricing
-    const mispricingPercent = Math.abs(sumOfAsks - 1.0) * 100;
+    // Calculate profit after fees
     const profitAfterFees = (1.0 - sumOfAsks) * 100 - this.config.platformFeePercent;
-
-    this.log.debug('Probability sum check', {
-      market: market.title.substring(0, 40),
-      yesAsk: yesAsk.toFixed(4),
-      noAsk: noAsk.toFixed(4),
-      sum: sumOfAsks.toFixed(4),
-      mispricingPct: mispricingPercent.toFixed(2),
-      profitAfterFees: profitAfterFees.toFixed(2),
-    });
 
     // Check for arbitrage opportunity: sum < $1.00 (minus fees)
     if (sumOfAsks < 1.0 && profitAfterFees > 0) {

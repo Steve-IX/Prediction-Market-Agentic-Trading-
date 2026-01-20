@@ -115,25 +115,6 @@ export class MomentumStrategy extends EventEmitter {
    * RELAXED for prediction markets - they move much less than stocks
    */
   private shouldBuy(stats: PriceStats): boolean {
-    // Log all conditions for debugging
-    const conditions = {
-      momentum: stats.momentum >= this.config.minMomentum,
-      changePercent: stats.changePercent >= this.config.minChangePercent,
-      trend: stats.trend === 'up' || stats.trend === 'neutral', // Accept neutral too
-      rsi: stats.rsi <= this.config.rsiOverbought,
-      aboveSma: stats.current >= stats.sma5 * 0.99, // Allow small tolerance
-    };
-
-    this.log.debug('Momentum BUY check', {
-      momentum: stats.momentum.toFixed(3),
-      changePercent: stats.changePercent.toFixed(2),
-      trend: stats.trend,
-      rsi: stats.rsi.toFixed(0),
-      current: stats.current.toFixed(4),
-      sma5: stats.sma5.toFixed(4),
-      conditions,
-    });
-
     // Check conditions with relaxed criteria
     if (stats.momentum < this.config.minMomentum) return false;
     if (stats.changePercent < this.config.minChangePercent) return false;
@@ -143,11 +124,6 @@ export class MomentumStrategy extends EventEmitter {
     // Relaxed: small tolerance for SMA comparison
     if (stats.current < stats.sma5 * 0.99) return false;
 
-    // Volume confirms move (optional)
-    if (stats.volumeSpike) {
-      this.log.debug('Volume spike detected - stronger signal');
-    }
-
     return true;
   }
 
@@ -156,25 +132,6 @@ export class MomentumStrategy extends EventEmitter {
    * RELAXED for prediction markets
    */
   private shouldSell(stats: PriceStats): boolean {
-    // Log all conditions for debugging
-    const conditions = {
-      momentum: stats.momentum <= -this.config.minMomentum,
-      changePercent: stats.changePercent <= -this.config.minChangePercent,
-      trend: stats.trend === 'down' || stats.trend === 'neutral',
-      rsi: stats.rsi >= this.config.rsiOversold,
-      belowSma: stats.current <= stats.sma5 * 1.01,
-    };
-
-    this.log.debug('Momentum SELL check', {
-      momentum: stats.momentum.toFixed(3),
-      changePercent: stats.changePercent.toFixed(2),
-      trend: stats.trend,
-      rsi: stats.rsi.toFixed(0),
-      current: stats.current.toFixed(4),
-      sma5: stats.sma5.toFixed(4),
-      conditions,
-    });
-
     // Check conditions with relaxed criteria
     if (stats.momentum > -this.config.minMomentum) return false;
     if (stats.changePercent > -this.config.minChangePercent) return false;

@@ -101,16 +101,6 @@ export class OrderbookImbalanceStrategy extends EventEmitter {
       timestamp: new Date(),
     });
 
-    this.log.debug('Orderbook imbalance check', {
-      market: market.title.substring(0, 40),
-      imbalanceRatio: metrics.imbalanceRatio.toFixed(2),
-      bidVolume: metrics.bidVolume.toFixed(0),
-      askVolume: metrics.askVolume.toFixed(0),
-      totalVolume: metrics.totalVolume.toFixed(0),
-      spreadPercent: metrics.spreadPercent.toFixed(2),
-      minRatio: this.config.minImbalanceRatio,
-    });
-
     // Check for buy signal (bid imbalance - buying pressure)
     if (metrics.imbalanceRatio >= this.config.minImbalanceRatio) {
       return this.createSignal(market, yesOutcome, 'BUY', metrics);

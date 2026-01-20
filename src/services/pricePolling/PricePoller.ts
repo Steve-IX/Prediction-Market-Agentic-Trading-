@@ -151,41 +151,35 @@ export class PricePoller extends EventEmitter {
         // Update tracked market with fresh data
         this.trackedMarkets.set(market.externalId, market);
 
-        // Emit price updates for each outcome
-        for (const outcome of market.outcomes) {
-          if (outcome.bestBid !== undefined && outcome.bestAsk !== undefined) {
-            const update: PolledPriceUpdate = {
-              platform: PLATFORMS.POLYMARKET,
-              marketId: market.externalId,
-              outcomeId: outcome.externalId,
-              bestBid: outcome.bestBid,
-              bestAsk: outcome.bestAsk,
-              midPrice: (outcome.bestBid + outcome.bestAsk) / 2,
-              timestamp: now,
-            };
+        // IMPORTANT: Only emit price update for YES outcome to avoid YES/NO price confusion
+        // The YES outcome is what we trade - NO is just 1-YES
+        const yesOutcome = market.outcomes.find(o => o.type === 'yes');
+        if (yesOutcome && yesOutcome.bestBid !== undefined && yesOutcome.bestAsk !== undefined) {
+          const update: PolledPriceUpdate = {
+            platform: PLATFORMS.POLYMARKET,
+            marketId: market.externalId,
+            outcomeId: yesOutcome.externalId,
+            bestBid: yesOutcome.bestBid,
+            bestAsk: yesOutcome.bestAsk,
+            midPrice: (yesOutcome.bestBid + yesOutcome.bestAsk) / 2,
+            timestamp: now,
+          };
 
-            this.emit('priceUpdate', update);
-            updatesEmitted++;
-          }
+          this.emit('priceUpdate', update);
+          updatesEmitted++;
         }
       }
 
       this.lastPollTime = now;
       const durationMs = Date.now() - startTime;
 
-      this.log.debug('Poll completed', {
-        marketsPolled: markets.length,
-        updatesEmitted,
-        durationMs,
-      });
-
-      // Periodic summary log
-      if (this.pollCount % 6 === 0) { // Every minute (6 * 10s)
+      // Periodic summary log only (every 3 minutes = 18 * 10s)
+      if (this.pollCount % 18 === 0) {
         this.log.info('Price poller summary', {
           pollCount: this.pollCount,
           trackedMarkets: this.trackedMarkets.size,
           lastPollUpdates: updatesEmitted,
-          avgPollDurationMs: durationMs,
+          durationMs,
         });
       }
 

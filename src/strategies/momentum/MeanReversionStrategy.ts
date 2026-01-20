@@ -103,16 +103,6 @@ export class MeanReversionStrategy extends EventEmitter {
   private isOversold(stats: PriceStats, deviationVwap: number, deviationSma: number): boolean {
     const avgDeviation = (Math.abs(deviationVwap) + Math.abs(deviationSma)) / 2;
 
-    this.log.debug('Mean reversion OVERSOLD check', {
-      deviationVwap: deviationVwap.toFixed(2),
-      deviationSma: deviationSma.toFixed(2),
-      avgDeviation: avgDeviation.toFixed(2),
-      rsi: stats.rsi.toFixed(0),
-      current: stats.current.toFixed(4),
-      vwap: stats.vwap.toFixed(4),
-      sma20: stats.sma20.toFixed(4),
-    });
-
     // Price significantly below mean (relaxed)
     if (deviationVwap > -this.config.minDeviation) return false;
     if (avgDeviation > this.config.maxDeviation) return false; // Too extreme
@@ -132,16 +122,6 @@ export class MeanReversionStrategy extends EventEmitter {
    */
   private isOverbought(stats: PriceStats, deviationVwap: number, deviationSma: number): boolean {
     const avgDeviation = (Math.abs(deviationVwap) + Math.abs(deviationSma)) / 2;
-
-    this.log.debug('Mean reversion OVERBOUGHT check', {
-      deviationVwap: deviationVwap.toFixed(2),
-      deviationSma: deviationSma.toFixed(2),
-      avgDeviation: avgDeviation.toFixed(2),
-      rsi: stats.rsi.toFixed(0),
-      current: stats.current.toFixed(4),
-      vwap: stats.vwap.toFixed(4),
-      sma20: stats.sma20.toFixed(4),
-    });
 
     // Price significantly above mean (relaxed)
     if (deviationVwap < this.config.minDeviation) return false;

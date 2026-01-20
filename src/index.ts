@@ -5,7 +5,6 @@ import { initializeDb, closeDb } from './database/index.js';
 import { PolymarketClient } from './clients/polymarket/index.js';
 import { KalshiClient } from './clients/kalshi/index.js';
 import { OrderManager } from './services/orderManager/index.js';
-import { SessionTracker } from './services/sessions/index.js';
 import { TradingEngine } from './tradingEngine.js';
 import { getMetrics, getContentType } from './utils/metrics.js';
 import type { AccountBalance } from './clients/shared/interfaces.js';
@@ -75,8 +74,7 @@ async function main(): Promise<void> {
   orderManager.registerClient(polymarket);
   orderManager.registerClient(kalshi);
 
-  // Initialize Session Tracker
-  let sessionTracker: SessionTracker | null = null;
+  // Initialize Trading Engine
   let tradingEngine: TradingEngine | null = null;
 
   if (config.features.enableWebSocket || config.features.enableCrossPlatformArb || config.features.enableSinglePlatformArb) {
@@ -95,21 +93,6 @@ async function main(): Promise<void> {
         log.error('Failed to initialize trading engine', { error });
       }
     }
-
-    // Initialize Session Tracker with callbacks
-    sessionTracker = new SessionTracker(
-      {
-        getBalance: async () => orderManager.getBalance(PLATFORMS.POLYMARKET),
-        getTrades: async (limit?: number) => orderManager.getTrades(limit),
-        getPositions: async () => orderManager.getPositions(),
-        getTradingState: () => ({
-          opportunitiesDetected: tradingEngine?.getState().opportunitiesDetected ?? 0,
-          executionsSucceeded: tradingEngine?.getState().executionsSucceeded ?? 0,
-        }),
-      },
-      isPaperTrading() ? 'paper' : 'live'
-    );
-    log.info('Session tracker initialized');
   }
 
   // Start API server
@@ -280,7 +263,7 @@ async function main(): Promise<void> {
   });
 
   // Start trading
-  app.post('/api/trading/start', async (req, res) => {
+  app.post('/api/trading/start', async (_req, res) => {
     if (!tradingEngine) {
       return res.status(404).json({ error: 'Trading engine not initialized' });
     }
@@ -292,19 +275,8 @@ async function main(): Promise<void> {
     }
 
     try {
-      // Start session tracking
-      const notes = req.body?.notes as string | undefined;
-      let session = null;
-      if (sessionTracker) {
-        session = await sessionTracker.startSession(notes);
-      }
-
       await tradingEngine.start();
-      res.json({ 
-        status: 'started', 
-        state: tradingEngine.getState(),
-        session: session ? { id: session.id, startTime: session.startTime } : null,
-      });
+      res.json({ status: 'started', state: tradingEngine.getState() });
       return;
     } catch (error) {
       res.status(500).json({
@@ -316,7 +288,7 @@ async function main(): Promise<void> {
   });
 
   // Stop trading
-  app.post('/api/trading/stop', async (req, res) => {
+  app.post('/api/trading/stop', async (_req, res) => {
     if (!tradingEngine) {
       return res.status(404).json({ error: 'Trading engine not initialized' });
     }
@@ -329,29 +301,7 @@ async function main(): Promise<void> {
 
     try {
       await tradingEngine.stop();
-      
-      // End session tracking
-      const notes = req.body?.notes as string | undefined;
-      let session = null;
-      if (sessionTracker && sessionTracker.isSessionActive()) {
-        session = await sessionTracker.endSession(notes);
-      }
-
-      res.json({ 
-        status: 'stopped', 
-        state: tradingEngine.getState(),
-        session: session ? {
-          id: session.id,
-          startTime: session.startTime,
-          endTime: session.endTime,
-          durationHours: session.durationSeconds ? (session.durationSeconds / 3600).toFixed(2) : null,
-          netPnl: session.netPnl?.toFixed(2),
-          tradesExecuted: session.tradesExecuted,
-          winRate: session.winRate ? (session.winRate * 100).toFixed(1) + '%' : null,
-          profitFactor: session.profitFactor?.toFixed(2),
-          strategiesUsed: session.strategiesUsed,
-        } : null,
-      });
+      res.json({ status: 'stopped', state: tradingEngine.getState() });
       return;
     } catch (error) {
       res.status(500).json({
@@ -413,404 +363,6 @@ async function main(): Promise<void> {
     }
   });
 
-  // ============================================
-  // Debug Endpoints (NEW)
-  // ============================================
-
-  // Get detailed strategy debug info
-  app.get('/api/trading/debug', async (_req, res): Promise<void> => {
-    if (!tradingEngine) {
-      res.status(404).json({ error: 'Trading engine not initialized' });
-      return;
-    }
-
-    try {
-      const state = tradingEngine.getState();
-      const markets = tradingEngine.getMarkets();
-      
-      // Get market counts by platform
-      const polymarketMarkets = markets.get(PLATFORMS.POLYMARKET) ?? [];
-      const kalshiMarkets = markets.get(PLATFORMS.KALSHI) ?? [];
-      
-      // Analyze a sample of markets for probability sum opportunities
-      const probabilitySumAnalysis: Array<{
-        title: string;
-        yesAsk: number | undefined;
-        noAsk: number | undefined;
-        sum: number | undefined;
-        deviation: string;
-      }> = [];
-      
-      for (const market of polymarketMarkets.slice(0, 100)) {
-        if (market.outcomes.length === 2) {
-          const yesOutcome = market.outcomes.find(o => o.type === 'yes');
-          const noOutcome = market.outcomes.find(o => o.type === 'no');
-          if (yesOutcome && noOutcome && yesOutcome.bestAsk && noOutcome.bestAsk) {
-            const sum = yesOutcome.bestAsk + noOutcome.bestAsk;
-            probabilitySumAnalysis.push({
-              title: market.title.substring(0, 50),
-              yesAsk: yesOutcome.bestAsk,
-              noAsk: noOutcome.bestAsk,
-              sum,
-              deviation: ((sum - 1) * 100).toFixed(3) + '%',
-            });
-          }
-        }
-      }
-      
-      // Sort by deviation from 1.0
-      probabilitySumAnalysis.sort((a, b) => {
-        const devA = Math.abs((a.sum ?? 1) - 1);
-        const devB = Math.abs((b.sum ?? 1) - 1);
-        return devB - devA;
-      });
-
-      res.json({
-        engineState: state,
-        config: {
-          paperTrading: isPaperTrading(),
-          strategies: config.strategies,
-          features: config.features,
-        },
-        marketCounts: {
-          polymarket: polymarketMarkets.length,
-          kalshi: kalshiMarkets.length,
-          binaryMarkets: polymarketMarkets.filter(m => m.outcomes.length === 2).length,
-        },
-        probabilitySumAnalysis: probabilitySumAnalysis.slice(0, 10),
-        topMispricing: probabilitySumAnalysis.length > 0 ? probabilitySumAnalysis[0] : null,
-        timestamp: new Date().toISOString(),
-      });
-    } catch (error) {
-      res.status(500).json({
-        error: 'Debug info error',
-        message: error instanceof Error ? error.message : String(error),
-      });
-    }
-  });
-
-  // Get all markets with their current prices
-  app.get('/api/trading/markets/analysis', async (_req, res): Promise<void> => {
-    if (!tradingEngine) {
-      res.status(404).json({ error: 'Trading engine not initialized' });
-      return;
-    }
-
-    try {
-      const markets = tradingEngine.getMarkets();
-      const polymarketMarkets = markets.get(PLATFORMS.POLYMARKET) ?? [];
-      
-      const analysis = polymarketMarkets
-        .filter(m => m.outcomes.length === 2 && m.isActive)
-        .map(market => {
-          const yesOutcome = market.outcomes.find(o => o.type === 'yes');
-          const noOutcome = market.outcomes.find(o => o.type === 'no');
-          
-          const yesAsk = yesOutcome?.bestAsk ?? 0;
-          const noAsk = noOutcome?.bestAsk ?? 0;
-          const yesBid = yesOutcome?.bestBid ?? 0;
-          const noBid = noOutcome?.bestBid ?? 0;
-          
-          const sumOfAsks = yesAsk + noAsk;
-          const sumOfBids = yesBid + noBid;
-          
-          return {
-            id: market.externalId,
-            title: market.title.substring(0, 60),
-            yesAsk,
-            noAsk,
-            yesBid,
-            noBid,
-            sumOfAsks: sumOfAsks.toFixed(4),
-            sumOfBids: sumOfBids.toFixed(4),
-            askMispricing: ((1 - sumOfAsks) * 100).toFixed(3) + '%',
-            bidMispricing: ((sumOfBids - 1) * 100).toFixed(3) + '%',
-            isArbOpportunity: sumOfAsks < 0.995, // Less than $0.995 for both = profit
-            spread: ((yesAsk - yesBid) * 100).toFixed(2) + '%',
-          };
-        })
-        .sort((a, b) => {
-          // Sort by arbitrage opportunity (lowest sum first)
-          return parseFloat(a.sumOfAsks) - parseFloat(b.sumOfAsks);
-        });
-
-      res.json({
-        totalMarkets: analysis.length,
-        arbOpportunities: analysis.filter(m => m.isArbOpportunity).length,
-        markets: analysis.slice(0, 50),
-        timestamp: new Date().toISOString(),
-      });
-    } catch (error) {
-      res.status(500).json({
-        error: 'Market analysis error',
-        message: error instanceof Error ? error.message : String(error),
-      });
-    }
-  });
-
-  // ============================================
-  // Session Tracking Endpoints
-  // ============================================
-
-  // Get all sessions
-  app.get('/api/sessions', async (_req, res) => {
-    if (!sessionTracker) {
-      res.status(404).json({ error: 'Session tracker not initialized' });
-      return;
-    }
-
-    try {
-      const sessions = sessionTracker.getCompletedSessions();
-      const currentSession = await sessionTracker.getCurrentSession();
-
-      res.json({
-        current: currentSession ? {
-          id: currentSession.id,
-          startTime: currentSession.startTime,
-          durationHours: currentSession.durationSeconds ? (currentSession.durationSeconds / 3600).toFixed(2) : null,
-          netPnl: currentSession.netPnl?.toFixed(2),
-          tradesExecuted: currentSession.tradesExecuted,
-          isActive: currentSession.isActive,
-        } : null,
-        completed: sessions.map(s => ({
-          id: s.id,
-          startTime: s.startTime,
-          endTime: s.endTime,
-          durationHours: s.durationSeconds ? (s.durationSeconds / 3600).toFixed(2) : null,
-          netPnl: s.netPnl?.toFixed(2),
-          tradesExecuted: s.tradesExecuted,
-          winRate: s.winRate ? (s.winRate * 100).toFixed(1) + '%' : null,
-          profitFactor: s.profitFactor?.toFixed(2),
-          mode: s.mode,
-          notes: s.notes,
-        })),
-        count: sessions.length,
-      });
-    } catch (error) {
-      res.status(500).json({
-        error: 'Failed to fetch sessions',
-        message: error instanceof Error ? error.message : String(error),
-      });
-    }
-  });
-
-  // Get current session details
-  app.get('/api/sessions/current', async (_req, res) => {
-    if (!sessionTracker) {
-      res.status(404).json({ error: 'Session tracker not initialized' });
-      return;
-    }
-
-    try {
-      const session = await sessionTracker.getCurrentSession();
-      
-      if (!session) {
-        res.json({ active: false, session: null });
-        return;
-      }
-
-      res.json({
-        active: true,
-        session: {
-          id: session.id,
-          startTime: session.startTime,
-          durationHours: session.durationSeconds ? (session.durationSeconds / 3600).toFixed(2) : null,
-          startBalance: session.startBalance?.toFixed(2),
-          currentBalance: session.endBalance?.toFixed(2),
-          netPnl: session.netPnl?.toFixed(2),
-          tradesExecuted: session.tradesExecuted,
-          opportunitiesDetected: session.opportunitiesDetected,
-          executionsSucceeded: session.executionsSucceeded,
-          winRate: session.winRate ? (session.winRate * 100).toFixed(1) + '%' : null,
-          profitFactor: session.profitFactor?.toFixed(2),
-          maxDrawdown: session.maxDrawdown?.toFixed(2),
-          strategiesUsed: session.strategiesUsed,
-          pnlByStrategy: session.pnlByStrategy,
-          mode: session.mode,
-        },
-      });
-    } catch (error) {
-      res.status(500).json({
-        error: 'Failed to fetch current session',
-        message: error instanceof Error ? error.message : String(error),
-      });
-    }
-  });
-
-  // Export sessions data (must come before /:id route)
-  app.get('/api/sessions/export', async (_req, res) => {
-    if (!sessionTracker) {
-      res.status(404).json({ error: 'Session tracker not initialized' });
-      return;
-    }
-
-    try {
-      const json = sessionTracker.exportToJson();
-      res.setHeader('Content-Type', 'application/json');
-      res.setHeader('Content-Disposition', `attachment; filename="sessions-${new Date().toISOString().split('T')[0]}.json"`);
-      res.send(json);
-    } catch (error) {
-      res.status(500).json({
-        error: 'Failed to export sessions',
-        message: error instanceof Error ? error.message : String(error),
-      });
-    }
-  });
-
-  // Get session by ID
-  app.get('/api/sessions/:id', async (req, res) => {
-    if (!sessionTracker) {
-      res.status(404).json({ error: 'Session tracker not initialized' });
-      return;
-    }
-
-    try {
-      const session = sessionTracker.getSession(req.params['id'] || '');
-      
-      if (!session) {
-        res.status(404).json({ error: 'Session not found' });
-        return;
-      }
-
-      res.json({
-        id: session.id,
-        startTime: session.startTime,
-        endTime: session.endTime,
-        durationHours: session.durationSeconds ? (session.durationSeconds / 3600).toFixed(2) : null,
-        startBalance: session.startBalance?.toFixed(2),
-        endBalance: session.endBalance?.toFixed(2),
-        netPnl: session.netPnl?.toFixed(2),
-        tradesExecuted: session.tradesExecuted,
-        opportunitiesDetected: session.opportunitiesDetected,
-        executionsSucceeded: session.executionsSucceeded,
-        winRate: session.winRate ? (session.winRate * 100).toFixed(1) + '%' : null,
-        profitFactor: session.profitFactor?.toFixed(2),
-        sharpeRatio: session.sharpeRatio?.toFixed(2),
-        maxDrawdown: session.maxDrawdown?.toFixed(2),
-        maxDrawdownPercent: session.maxDrawdownPercent?.toFixed(2) + '%',
-        strategiesUsed: session.strategiesUsed,
-        pnlByStrategy: session.pnlByStrategy,
-        mode: session.mode,
-        notes: session.notes,
-        isActive: session.isActive,
-      });
-    } catch (error) {
-      res.status(500).json({
-        error: 'Failed to fetch session',
-        message: error instanceof Error ? error.message : String(error),
-      });
-    }
-  });
-
-  // Get session summary statistics
-  app.get('/api/sessions/stats/summary', async (_req, res) => {
-    if (!sessionTracker) {
-      res.status(404).json({ error: 'Session tracker not initialized' });
-      return;
-    }
-
-    try {
-      const summary = sessionTracker.getSummary();
-      
-      res.json({
-        totalSessions: summary.totalSessions,
-        activeSessions: summary.activeSessions,
-        totalTrades: summary.totalTrades,
-        totalPnl: summary.totalPnl.toFixed(2),
-        avgPnlPerSession: summary.avgPnlPerSession.toFixed(2),
-        avgWinRate: (summary.avgWinRate * 100).toFixed(1) + '%',
-        avgProfitFactor: summary.avgProfitFactor.toFixed(2),
-        totalDurationHours: summary.totalDurationHours.toFixed(2),
-        bestSession: summary.bestSession ? {
-          id: summary.bestSession.id,
-          netPnl: summary.bestSession.netPnl?.toFixed(2),
-          startTime: summary.bestSession.startTime,
-        } : null,
-        worstSession: summary.worstSession ? {
-          id: summary.worstSession.id,
-          netPnl: summary.worstSession.netPnl?.toFixed(2),
-          startTime: summary.worstSession.startTime,
-        } : null,
-      });
-    } catch (error) {
-      res.status(500).json({
-        error: 'Failed to calculate session summary',
-        message: error instanceof Error ? error.message : String(error),
-      });
-    }
-  });
-
-  // Manually start a session (if trading already running)
-  app.post('/api/sessions/start', async (req, res) => {
-    if (!sessionTracker) {
-      res.status(404).json({ error: 'Session tracker not initialized' });
-      return;
-    }
-
-    try {
-      const notes = req.body?.notes as string | undefined;
-      const session = await sessionTracker.startSession(notes);
-      
-      res.json({
-        status: 'session_started',
-        session: {
-          id: session.id,
-          startTime: session.startTime,
-          startBalance: session.startBalance?.toFixed(2),
-          mode: session.mode,
-        },
-      });
-    } catch (error) {
-      res.status(500).json({
-        error: 'Failed to start session',
-        message: error instanceof Error ? error.message : String(error),
-      });
-    }
-  });
-
-  // Manually end a session
-  app.post('/api/sessions/end', async (req, res) => {
-    if (!sessionTracker) {
-      res.status(404).json({ error: 'Session tracker not initialized' });
-      return;
-    }
-
-    if (!sessionTracker.isSessionActive()) {
-      res.status(400).json({ error: 'No active session to end' });
-      return;
-    }
-
-    try {
-      const notes = req.body?.notes as string | undefined;
-      const session = await sessionTracker.endSession(notes);
-      
-      if (!session) {
-        res.status(400).json({ error: 'Failed to end session' });
-        return;
-      }
-
-      res.json({
-        status: 'session_ended',
-        session: {
-          id: session.id,
-          startTime: session.startTime,
-          endTime: session.endTime,
-          durationHours: session.durationSeconds ? (session.durationSeconds / 3600).toFixed(2) : null,
-          netPnl: session.netPnl?.toFixed(2),
-          tradesExecuted: session.tradesExecuted,
-          winRate: session.winRate ? (session.winRate * 100).toFixed(1) + '%' : null,
-          profitFactor: session.profitFactor?.toFixed(2),
-          strategiesUsed: session.strategiesUsed,
-        },
-      });
-    } catch (error) {
-      res.status(500).json({
-        error: 'Failed to end session',
-        message: error instanceof Error ? error.message : String(error),
-      });
-    }
-  });
-
   app.listen(config.api.port, () => {
     log.info(`API server listening on port ${config.api.port}`);
   });
@@ -864,16 +416,6 @@ async function main(): Promise<void> {
     tradingStop: 'POST /api/trading/stop',
     tradingScan: 'POST /api/trading/scan',
     killSwitch: 'POST /api/kill-switch',
-    tradingDebug: 'GET /api/trading/debug',
-    marketAnalysis: 'GET /api/trading/markets/analysis',
-    // Session tracking endpoints
-    sessions: 'GET /api/sessions',
-    sessionCurrent: 'GET /api/sessions/current',
-    sessionById: 'GET /api/sessions/:id',
-    sessionSummary: 'GET /api/sessions/stats/summary',
-    sessionExport: 'GET /api/sessions/export',
-    sessionStart: 'POST /api/sessions/start',
-    sessionEnd: 'POST /api/sessions/end',
   });
 }
 

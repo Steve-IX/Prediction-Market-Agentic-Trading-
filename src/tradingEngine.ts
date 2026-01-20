@@ -9,7 +9,6 @@ import { KalshiClient } from './clients/kalshi/KalshiClient.js';
 import { PolymarketWebSocket } from './clients/polymarket/PolymarketWebSocket.js';
 import { KalshiWebSocket } from './clients/kalshi/KalshiWebSocket.js';
 import { MarketDataService, type PriceUpdate } from './services/marketData/index.js';
-import { PricePoller, type PolledPriceUpdate } from './services/pricePolling/index.js';
 import { OrderManager } from './services/orderManager/index.js';
 import { MarketMatcher, type MarketPair } from './services/matching/index.js';
 import { ArbitrageDetector, type ArbitrageOpportunity } from './strategies/arbitrage/ArbitrageDetector.js';
@@ -92,7 +91,6 @@ export class TradingEngine extends EventEmitter {
 
   // Services
   private marketDataService: MarketDataService;
-  private pricePoller: PricePoller;
   private orderManager: OrderManager;
   private marketMatcher: MarketMatcher;
 
@@ -146,12 +144,6 @@ export class TradingEngine extends EventEmitter {
     // Create market data service
     this.marketDataService = new MarketDataService(this.polyWs, this.kalshiWs);
 
-    // Create price poller for REST-based price updates (supplements WebSocket)
-    this.pricePoller = new PricePoller(polyClient, {
-      pollIntervalMs: 10000, // Poll every 10 seconds
-      maxMarkets: 200, // Track up to 200 markets
-    });
-
     // Create market matcher
     this.marketMatcher = new MarketMatcher();
 
@@ -159,15 +151,11 @@ export class TradingEngine extends EventEmitter {
     this.arbitrageDetector = new ArbitrageDetector();
     this.arbitrageExecutor = new ArbitrageExecutor(this.orderManager);
     
-    // Create new strategy components with all strategy options
+    // Create new strategy components
     this.strategyManager = new StrategyManager({
-      // Technical analysis strategies
       enableMomentum: this.appConfig.features.enableMomentumStrategy,
       enableMeanReversion: this.appConfig.features.enableMeanReversionStrategy,
       enableOrderbookImbalance: this.appConfig.features.enableOrderbookImbalanceStrategy,
-      // Prediction market-specific strategies (NEW)
-      enableProbabilitySum: this.appConfig.features.enableProbabilitySumStrategy,
-      enableEndgame: this.appConfig.features.enableEndgameStrategy,
       signalCooldownMs: this.appConfig.strategies.signalCooldownMs,
     });
     this.signalExecutor = new SignalExecutor(this.orderManager);
@@ -267,13 +255,6 @@ export class TradingEngine extends EventEmitter {
     // Start kill switch monitoring
     this.killSwitch.start();
 
-    // Start price poller (supplements WebSocket with REST polling)
-    const polymarketMarkets = this.markets.get(PLATFORMS.POLYMARKET) ?? [];
-    this.pricePoller.start(polymarketMarkets);
-    this.log.info('Price poller started', { 
-      marketsToTrack: Math.min(polymarketMarkets.length, 200) 
-    });
-
     // Start polling interval as fallback
     if (this.config.scanIntervalMs > 0) {
       this.pollingInterval = setInterval(
@@ -307,9 +288,6 @@ export class TradingEngine extends EventEmitter {
       clearInterval(this.pollingInterval);
       this.pollingInterval = null;
     }
-
-    // Stop price poller
-    this.pricePoller.stop();
 
     // Stop kill switch monitoring
     this.killSwitch.stop();
@@ -387,11 +365,6 @@ export class TradingEngine extends EventEmitter {
 
     this.arbitrageExecutor.on('executionFailed', (error: Error) => {
       this.log.error('Execution failed', { error: error.message });
-    });
-
-    // Price poller events (REST API polling supplements WebSocket)
-    this.pricePoller.on('priceUpdate', (update: PolledPriceUpdate) => {
-      this.onPolledPriceUpdate(update);
     });
 
     // Strategy manager signal events
@@ -477,32 +450,6 @@ export class TradingEngine extends EventEmitter {
     }
 
     await this.scanForOpportunities();
-  }
-
-  /**
-   * Handle polled price updates from REST API
-   * This supplements WebSocket data for markets without activity
-   */
-  private onPolledPriceUpdate(update: PolledPriceUpdate): void {
-    // Track price history for strategies
-    if (update.bestBid !== undefined && update.bestAsk !== undefined) {
-      this.strategyManager.processPriceUpdate(
-        update.marketId,
-        update.midPrice,
-        undefined, // volume not in polled data
-        undefined,
-        undefined
-      );
-
-      // Cache orderbook for strategy analysis
-      this.orderbooks.set(update.outcomeId, {
-        marketId: update.marketId,
-        outcomeId: update.outcomeId,
-        bids: [{ price: update.bestBid, size: 0 }],
-        asks: [{ price: update.bestAsk, size: 0 }],
-        timestamp: update.timestamp,
-      });
-    }
   }
 
   private async scanForOpportunities(): Promise<ArbitrageOpportunity[]> {
@@ -732,25 +679,24 @@ export class TradingEngine extends EventEmitter {
 
   private subscribeToTrackedMarkets(): void {
     // Subscribe to Polymarket markets
-    // INCREASED from 20 to 100 for more trading opportunities
-    const MAX_SUBSCRIPTIONS = 100;
-    
     const polymarketMarkets = this.markets.get(PLATFORMS.POLYMARKET) ?? [];
-    for (const market of polymarketMarkets.slice(0, MAX_SUBSCRIPTIONS)) {
+    for (const market of polymarketMarkets.slice(0, 20)) {
+      // Limit to top 20 for now
       const outcomeIds = market.outcomes.map((o) => o.externalId);
       this.marketDataService.trackMarket(PLATFORMS.POLYMARKET, market.externalId, outcomeIds);
     }
 
     // Subscribe to Kalshi markets
     const kalshiMarkets = this.markets.get(PLATFORMS.KALSHI) ?? [];
-    for (const market of kalshiMarkets.slice(0, MAX_SUBSCRIPTIONS)) {
+    for (const market of kalshiMarkets.slice(0, 20)) {
+      // Limit to top 20 for now
       const outcomeIds = market.outcomes.map((o) => o.externalId);
       this.marketDataService.trackMarket(PLATFORMS.KALSHI, market.externalId, outcomeIds);
     }
 
     this.log.info('Subscribed to tracked markets', {
-      polymarket: Math.min(polymarketMarkets.length, MAX_SUBSCRIPTIONS),
-      kalshi: Math.min(kalshiMarkets.length, MAX_SUBSCRIPTIONS),
+      polymarket: Math.min(polymarketMarkets.length, 20),
+      kalshi: Math.min(kalshiMarkets.length, 20),
     });
   }
 }

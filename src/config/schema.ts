@@ -68,42 +68,31 @@ const FeatureFlagsSchema = z.object({
   enableSinglePlatformArb: z.boolean().default(true),
   enableMarketMaking: z.boolean().default(false),
   enableWebSocket: z.boolean().default(true),
-  // Technical analysis strategies
+  // New trading strategies
   enableMomentumStrategy: z.boolean().default(true),
   enableMeanReversionStrategy: z.boolean().default(true),
   enableOrderbookImbalanceStrategy: z.boolean().default(true),
-  // Prediction market-specific strategies (NEW - highest priority)
-  enableProbabilitySumStrategy: z.boolean().default(true), // YES+NO != $1 arbitrage
-  enableEndgameStrategy: z.boolean().default(true), // High probability near resolution
 });
 
 // Strategy configuration schema
 const StrategyConfigSchema = z.object({
-  // Momentum strategy (lowered for prediction market volatility)
-  momentumMinMomentum: z.number().min(0).max(1).default(0.15), // Lowered from 0.4
-  momentumMinChangePercent: z.number().min(0).default(0.5), // Lowered from 2
+  // Momentum strategy
+  momentumMinMomentum: z.number().min(0).max(1).default(0.4),
+  momentumMinChangePercent: z.number().min(0).default(2),
   
-  // Mean reversion strategy (lowered for prediction market volatility)
-  meanReversionMinDeviation: z.number().min(0).default(1.0), // Lowered from 3
-  meanReversionMaxDeviation: z.number().min(0).default(10), // Lowered from 15
+  // Mean reversion strategy
+  meanReversionMinDeviation: z.number().min(0).default(3),
+  meanReversionMaxDeviation: z.number().min(0).default(15),
   
   // Orderbook imbalance strategy
-  orderbookImbalanceRatio: z.number().min(1).default(1.5), // Lowered from 2
-  
-  // Probability sum strategy (NEW)
-  probabilitySumMinMispricingPercent: z.number().min(0).default(0.5),
-  
-  // Endgame strategy (NEW)
-  endgameMinProbability: z.number().min(0).max(1).default(0.90),
-  endgameMaxHoursToResolution: z.number().positive().default(168), // 1 week
-  endgameMinAnnualizedReturn: z.number().positive().default(50), // 50%
+  orderbookImbalanceRatio: z.number().min(1).default(2),
   
   // Position sizing
   maxPositionSize: z.number().positive().default(100),
   minPositionSize: z.number().positive().default(10),
   
-  // Cooldown between signals on same market (reduced)
-  signalCooldownMs: z.number().positive().default(15000), // Reduced from 30000
+  // Cooldown between signals on same market
+  signalCooldownMs: z.number().positive().default(30000),
 });
 
 // Anthropic configuration schema

@@ -135,9 +135,21 @@ export class OrderManager extends EventEmitter {
     }
 
     if (this.usePaperTrading && this.paperEngine) {
-      // IMPORTANT: Don't use external orderbook - it may have wrong outcome prices
-      // Paper trading will use the order's price directly with simulated slippage
-      return this.paperEngine.placeOrder(order);
+      // Get order book from real client if available for realistic fills
+      const client = this.clients.get(order.platform);
+      let orderBook;
+
+      if (client?.isConnected()) {
+        try {
+          orderBook = await client.getOrderBook(order.marketId, order.outcomeId);
+        } catch (error) {
+          this.log.warn('Failed to get order book for paper trading', {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+
+      return this.paperEngine.placeOrder(order, orderBook);
     }
 
     // Live trading

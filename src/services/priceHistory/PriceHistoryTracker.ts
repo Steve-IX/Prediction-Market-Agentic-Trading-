@@ -41,33 +41,10 @@ export class PriceHistoryTracker extends EventEmitter {
   private maxHistorySize: number;
   private updateInterval: number; // ms between price captures
 
-  // CHANGED: Reduced default interval from 1000ms to 500ms for faster data collection
-  constructor(maxHistorySize = 1000, updateIntervalMs = 500) {
+  constructor(maxHistorySize = 1000, updateIntervalMs = 1000) {
     super();
     this.maxHistorySize = maxHistorySize;
     this.updateInterval = updateIntervalMs;
-  }
-
-  /**
-   * Get data point count for a market (for debugging)
-   */
-  getPointCount(marketId: string): number {
-    return this.history.get(marketId)?.length ?? 0;
-  }
-
-  /**
-   * Get all tracked market stats summary (for debugging)
-   */
-  getTrackedMarketsSummary(): Array<{ marketId: string; pointCount: number; hasStats: boolean }> {
-    const summary: Array<{ marketId: string; pointCount: number; hasStats: boolean }> = [];
-    for (const [marketId, points] of this.history) {
-      summary.push({
-        marketId,
-        pointCount: points.length,
-        hasStats: points.length >= 3,
-      });
-    }
-    return summary;
   }
 
   /**
@@ -115,12 +92,11 @@ export class PriceHistoryTracker extends EventEmitter {
     }
 
     // Emit event for significant price changes
-    // Only emit if we have enough history and the move is real (not YES/NO swap)
-    if (points.length >= 3) {
+    if (points.length >= 2) {
       const prevPrice = points[points.length - 2]!.price;
       const changePct = Math.abs((price - prevPrice) / prevPrice) * 100;
-      // Ignore huge swings (likely YES/NO confusion) - real moves are < 20%
-      if (changePct >= 2 && changePct < 20) {
+      if (changePct >= 1) {
+        // 1% move
         this.emit('significantMove', {
           marketId,
           price,
@@ -134,20 +110,17 @@ export class PriceHistoryTracker extends EventEmitter {
 
   /**
    * Get price statistics for a market
-   * OPTIMIZED: Reduced minimum data points from 5 to 3 for faster signal generation
    */
   getStats(marketId: string, windowMinutes = 60): PriceStats | null {
     const points = this.history.get(marketId);
-    // CHANGED: Reduced from 5 to 3 minimum points for faster initial signals
-    if (!points || points.length < 3) return null;
+    if (!points || points.length < 5) return null;
 
     const now = new Date();
     const windowStart = new Date(now.getTime() - windowMinutes * 60 * 1000);
 
     // Filter to window
     const windowPoints = points.filter((p) => p.timestamp >= windowStart);
-    // CHANGED: Reduced from 5 to 3 minimum points
-    if (windowPoints.length < 3) return null;
+    if (windowPoints.length < 5) return null;
 
     const prices = windowPoints.map((p) => p.price);
     const volumes = windowPoints.map((p) => p.volume ?? 0);
@@ -305,8 +278,7 @@ export class PriceHistoryTracker extends EventEmitter {
   }
 
   private calculateMomentum(prices: number[]): number {
-    // CHANGED: Reduced from 10 to 3 minimum for faster signals
-    if (prices.length < 3) return 0;
+    if (prices.length < 10) return 0;
 
     // Linear regression slope normalized to -1 to 1
     const n = Math.min(prices.length, 20);

@@ -100,34 +100,21 @@ function buildConfigFromEnv(): unknown {
       enableSinglePlatformArb: parseBoolean(env['ENABLE_SINGLE_PLATFORM_ARB'], true),
       enableMarketMaking: parseBoolean(env['ENABLE_MARKET_MAKING'], false),
       enableWebSocket: parseBoolean(env['ENABLE_WEBSOCKET'], true),
-      // Technical analysis strategies
+      // New strategies - enabled by default for better trading
       enableMomentumStrategy: parseBoolean(env['ENABLE_MOMENTUM_STRATEGY'], true),
       enableMeanReversionStrategy: parseBoolean(env['ENABLE_MEAN_REVERSION_STRATEGY'], true),
       enableOrderbookImbalanceStrategy: parseBoolean(env['ENABLE_ORDERBOOK_IMBALANCE_STRATEGY'], true),
-      // Prediction market-specific strategies (NEW)
-      enableProbabilitySumStrategy: parseBoolean(env['ENABLE_PROBABILITY_SUM_STRATEGY'], true),
-      enableEndgameStrategy: parseBoolean(env['ENABLE_ENDGAME_STRATEGY'], true),
     },
 
     strategies: {
-      // IMPORTANT: These values are LOWERED for prediction market volatility
-      // Prediction markets move much less than stocks - even 0.5% is significant
-      momentumMinMomentum: parseNumber(env['MOMENTUM_MIN_MOMENTUM'], 0.15), // Lowered from 0.4
-      momentumMinChangePercent: parseNumber(env['MOMENTUM_MIN_CHANGE_PERCENT'], 0.5), // Lowered from 2
-      meanReversionMinDeviation: parseNumber(env['MEAN_REVERSION_MIN_DEVIATION'], 1.0), // Lowered from 3
-      meanReversionMaxDeviation: parseNumber(env['MEAN_REVERSION_MAX_DEVIATION'], 10), // Lowered from 15
-      orderbookImbalanceRatio: parseNumber(env['ORDERBOOK_IMBALANCE_RATIO'], 1.5), // Lowered from 2
-      // Probability sum strategy (NEW)
-      probabilitySumMinMispricingPercent: parseNumber(env['PROBABILITY_SUM_MIN_MISPRICING'], 0.5),
-      // Endgame strategy (NEW)
-      endgameMinProbability: parseNumber(env['ENDGAME_MIN_PROBABILITY'], 0.90),
-      endgameMaxHoursToResolution: parseNumber(env['ENDGAME_MAX_HOURS'], 168),
-      endgameMinAnnualizedReturn: parseNumber(env['ENDGAME_MIN_ANNUALIZED_RETURN'], 50),
-      // Position sizing
+      momentumMinMomentum: parseNumber(env['MOMENTUM_MIN_MOMENTUM'], 0.4),
+      momentumMinChangePercent: parseNumber(env['MOMENTUM_MIN_CHANGE_PERCENT'], 2),
+      meanReversionMinDeviation: parseNumber(env['MEAN_REVERSION_MIN_DEVIATION'], 3),
+      meanReversionMaxDeviation: parseNumber(env['MEAN_REVERSION_MAX_DEVIATION'], 15),
+      orderbookImbalanceRatio: parseNumber(env['ORDERBOOK_IMBALANCE_RATIO'], 2),
       maxPositionSize: parseNumber(env['STRATEGY_MAX_POSITION_SIZE'], 100),
       minPositionSize: parseNumber(env['STRATEGY_MIN_POSITION_SIZE'], 10),
-      // Cooldown (reduced for faster trading)
-      signalCooldownMs: parseNumber(env['STRATEGY_SIGNAL_COOLDOWN_MS'], 15000), // Reduced from 30000
+      signalCooldownMs: parseNumber(env['STRATEGY_SIGNAL_COOLDOWN_MS'], 30000),
     },
 
     anthropic: {

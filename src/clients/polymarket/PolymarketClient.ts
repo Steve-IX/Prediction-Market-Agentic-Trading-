@@ -69,43 +69,90 @@ export class PolymarketClient implements IPlatformClient {
       const signatureType = this.mapSignatureType(this.config.signatureType);
 
       // Check if L2 API credentials are provided directly
+      let shouldAutoDerive = false;
+      
       if (this.config.apiKey && this.config.apiSecret && this.config.apiPassphrase) {
         // Use provided L2 API credentials directly
         this.log.info('Using provided L2 API credentials', {
-          apiKey: `${this.config.apiKey.substring(0, 8)}...`,
+          apiKey: this.config.apiKey.substring(0, 8) + '...',
           apiKeyLength: this.config.apiKey.length,
           secretLength: this.config.apiSecret.length,
           passphraseLength: this.config.apiPassphrase.length,
           walletAddress: this.signer.address,
         });
         
-        // Trim whitespace from credentials (common issue with env vars)
         const apiCreds = {
-          key: this.config.apiKey.trim(),
-          secret: this.config.apiSecret.trim(),
-          passphrase: this.config.apiPassphrase.trim(),
+          key: this.config.apiKey,
+          secret: this.config.apiSecret,
+          passphrase: this.config.apiPassphrase,
         };
 
         // Initialize trading client with provided credentials
         this.client = new ClobClient(this.config.host, this.config.chainId, this.signer, apiCreds, signatureType);
 
-        this.connected = true;
-        this.readOnly = false;
+        // Verify the credentials work by making a test request
+        try {
+          await this.client.getBalanceAllowance({ asset_type: AssetType.COLLATERAL });
+          this.log.info('L2 API credentials verified successfully');
+          
+          // Credentials verified, mark as connected and return
+          this.connected = true;
+          this.readOnly = false;
 
-        const durationMs = timer();
-        observeApiLatency(this.platform, 'connect', durationMs);
-        recordApiRequest(this.platform, 'connect', 'success');
+          const durationMs = timer();
+          observeApiLatency(this.platform, 'connect', durationMs);
+          recordApiRequest(this.platform, 'connect', 'success');
 
-        this.log.info('Connected to Polymarket CLOB with L2 credentials', {
-          address: this.signer.address,
-          chainId: this.config.chainId,
-          durationMs,
-        });
+          this.log.info('Connected to Polymarket CLOB with L2 credentials', {
+            address: this.signer.address,
+            chainId: this.config.chainId,
+            durationMs,
+          });
+          return;
+        } catch (verifyError) {
+          const errMsg = verifyError instanceof Error ? verifyError.message : String(verifyError);
+          const errStr = JSON.stringify(verifyError);
+          
+          // Check for 401 Unauthorized - likely wrong wallet
+          if (errStr.includes('401') || errStr.includes('Unauthorized') || errStr.includes('Invalid api key')) {
+            this.log.error('L2 API credentials INVALID - likely generated for a different wallet!', {
+              walletFromPrivateKey: this.signer.address,
+              suggestion: 'Either: (1) Remove POLYMARKET_API_KEY/SECRET/PASSPHRASE env vars to auto-derive, OR (2) Generate new API keys while logged into Polymarket with this wallet',
+            });
+            
+            // Mark for auto-derive fallback
+            shouldAutoDerive = true;
+            this.log.warn('Attempting to auto-derive API credentials instead...');
+          } else {
+            this.log.warn('Could not verify L2 credentials, proceeding anyway', { error: errMsg });
+            // Non-auth error, proceed with provided credentials
+            this.connected = true;
+            this.readOnly = false;
+
+            const durationMs = timer();
+            observeApiLatency(this.platform, 'connect', durationMs);
+            recordApiRequest(this.platform, 'connect', 'success');
+
+            this.log.info('Connected to Polymarket CLOB with L2 credentials (unverified)', {
+              address: this.signer.address,
+              chainId: this.config.chainId,
+              durationMs,
+            });
+            return;
+          }
+        }
+      }
+      
+      // If we get here, either no credentials were provided OR they failed validation
+      if (!shouldAutoDerive && this.config.apiKey) {
+        // This shouldn't happen, but just in case
         return;
       }
 
-      // No L2 credentials provided - try to derive API credentials
-      this.log.info('No L2 API credentials provided, attempting to derive...');
+      // No L2 credentials provided OR they failed validation - try to derive API credentials
+      this.log.info(shouldAutoDerive 
+        ? 'Auto-deriving API credentials after failed validation...' 
+        : 'No L2 API credentials provided, attempting to derive...');
       
       // Create temporary client to derive API credentials
       const tempClient = new ClobClient(this.config.host, this.config.chainId, this.signer);
@@ -513,79 +560,7 @@ export class PolymarketClient implements IPlatformClient {
       observeApiLatency(this.platform, 'getBalance', durationMs);
       recordApiRequest(this.platform, 'getBalance', 'error');
 
-      // Enhanced error logging for authentication issues
-      if (error && typeof error === 'object' && 'status' in error) {
-        const statusError = error as { status?: number; statusText?: string; data?: unknown };
-        if (statusError.status === 401) {
-          this.log.error('Authentication failed (401 Unauthorized) - provided L2 credentials invalid', {
-            status: statusError.status,
-            statusText: statusError.statusText,
-            data: statusError.data,
-            walletAddress: this.signer?.address,
-            hasApiKey: !!this.config.apiKey,
-            hasApiSecret: !!this.config.apiSecret,
-            hasApiPassphrase: !!this.config.apiPassphrase,
-            hint: 'Provided L2 API credentials are invalid. Attempting to derive new credentials automatically...',
-          });
-
-          // Auto-fallback: Try to derive credentials if provided ones fail
-          if (this.config.apiKey && this.config.apiSecret && this.config.apiPassphrase && this.signer) {
-            try {
-              this.log.info('Attempting to derive API credentials automatically...');
-              const tempClient = new ClobClient(this.config.host, this.config.chainId, this.signer);
-              const signatureType = this.mapSignatureType(this.config.signatureType);
-              
-              const derivedCreds = await retry(
-                async () => tempClient.createOrDeriveApiKey(),
-                {
-                  maxAttempts: 3,
-                  initialDelayMs: 1000,
-                  onRetry: (attempt, error) => {
-                    this.log.warn(`API key derivation attempt ${attempt} failed`, {
-                      error: error instanceof Error ? error.message : String(error),
-                    });
-                  },
-                }
-              );
-
-              // Reinitialize client with derived credentials
-              this.client = new ClobClient(this.config.host, this.config.chainId, this.signer, derivedCreds, signatureType);
-              this.log.info('Successfully derived and applied new API credentials');
-
-              // Retry balance request with new credentials
-              const balanceData = await this.client.getBalanceAllowance({
-                asset_type: AssetType.COLLATERAL,
-              });
-
-              const balance = balanceData.balance;
-              const available = typeof balance === 'string' ? parseFloat(balance) / 1e6 : 0;
-
-              recordApiRequest(this.platform, 'getBalance', 'success');
-              return {
-                available,
-                locked: 0,
-                total: available,
-                currency: 'USDC',
-              };
-            } catch (deriveError) {
-              this.log.error('Failed to derive API credentials as fallback', {
-                error: deriveError instanceof Error ? deriveError.message : String(deriveError),
-              });
-            }
-          }
-        } else {
-          this.log.error('Failed to get balance', {
-            status: statusError.status,
-            statusText: statusError.statusText,
-            data: statusError.data,
-            error: error instanceof Error ? error.message : String(error),
-          });
-        }
-      } else {
-        this.log.error('Failed to get balance', {
-          error: error instanceof Error ? error.message : String(error),
-        });
-      }
+      this.log.error('Failed to get balance', { error });
       throw error;
     }
   }

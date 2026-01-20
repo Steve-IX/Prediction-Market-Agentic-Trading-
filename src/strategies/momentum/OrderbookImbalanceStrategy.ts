@@ -38,16 +38,15 @@ export interface OrderbookImbalanceConfig {
   maxSpreadPercent: number; // Maximum bid-ask spread
 }
 
-// IMPORTANT: Prediction markets have lower volume - adjust thresholds
 const DEFAULT_CONFIG: OrderbookImbalanceConfig = {
-  minImbalanceRatio: 1.5, // Lowered from 2.0 - 1.5x imbalance is significant in prediction markets
+  minImbalanceRatio: 2.0, // 2x more on one side
   depthLevels: 5,
   maxPositionSize: 100,
   minPositionSize: 10,
-  takeProfitPercent: 1.5, // Lowered for faster exits
-  stopLossPercent: 2,
-  minTotalVolume: 10, // Lowered significantly from 100 - prediction markets have less volume
-  maxSpreadPercent: 10, // Increased from 5 - prediction markets can have wider spreads
+  takeProfitPercent: 2,
+  stopLossPercent: 3,
+  minTotalVolume: 100,
+  maxSpreadPercent: 5,
 };
 
 /**

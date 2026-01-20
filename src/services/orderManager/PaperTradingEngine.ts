@@ -174,11 +174,6 @@ export class PaperTradingEngine extends EventEmitter {
       updatedAt: new Date(),
     };
 
-    // Copy strategyId if present
-    if (order.strategyId) {
-      normalizedOrder.strategyId = order.strategyId;
-    }
-
     // Lock funds for buy orders
     if (order.side === ORDER_SIDES.BUY) {
       balance.available -= orderValue;
@@ -322,11 +317,11 @@ export class PaperTradingEngine extends EventEmitter {
     // Update metrics
     paperTradingBalance.labels(order.platform).set(balance.total);
 
-    // Update position and get realized P&L (for SELL trades)
-    const realizedPnl = this.updatePosition(order, fillSize, fillPrice);
+    // Update position
+    this.updatePosition(order, fillSize, fillPrice);
 
-    // Create trade record with strategyId and realizedPnl
-    this.createTradeRecord(order, fillSize, fillPrice, fee, realizedPnl);
+    // Create trade record
+    this.createTradeRecord(order, fillSize, fillPrice, fee);
 
     // Remove from open orders if fully filled
     if (order.status === ORDER_STATUSES.FILLED) {
@@ -366,9 +361,8 @@ export class PaperTradingEngine extends EventEmitter {
 
   /**
    * Update position after a fill
-   * Returns realized P&L for SELL trades, 0 for BUY trades
    */
-  private updatePosition(order: NormalizedOrder, fillSize: number, fillPrice: number): number {
+  private updatePosition(order: NormalizedOrder, fillSize: number, fillPrice: number): void {
     const positionKey = `${order.platform}:${order.marketId}:${order.outcomeId}`;
     let position = this.positions.get(positionKey);
 
@@ -386,20 +380,18 @@ export class PaperTradingEngine extends EventEmitter {
     }
 
     if (order.side === ORDER_SIDES.BUY) {
-      // Buying increases position - no realized P&L yet
+      // Buying increases position
       const newSize = position.size + fillSize;
       if (newSize > 0) {
         position.avgEntryPrice = (position.avgEntryPrice * position.size + fillPrice * fillSize) / newSize;
       }
       position.size = newSize;
-      return 0; // No realized P&L for buy trades
     } else {
       // Selling decreases position
-      let realizedPnl = 0;
       if (position.size > 0) {
         // Realize P&L
-        realizedPnl = fillSize * (fillPrice - position.avgEntryPrice);
-        position.realizedPnl += realizedPnl;
+        const pnl = fillSize * (fillPrice - position.avgEntryPrice);
+        position.realizedPnl += pnl;
       }
       position.size -= fillSize;
 
@@ -408,24 +400,16 @@ export class PaperTradingEngine extends EventEmitter {
         position.avgEntryPrice = 0;
         position.size = 0;
       }
-      return realizedPnl; // Return realized P&L for this trade
     }
   }
 
   /**
    * Create trade record
    */
-  private createTradeRecord(
-    order: NormalizedOrder,
-    fillSize: number,
-    fillPrice: number,
-    fee: number,
-    realizedPnl: number
-  ): void {
+  private createTradeRecord(order: NormalizedOrder, fillSize: number, fillPrice: number, fee: number): void {
     this.tradeCounter++;
     const tradeId = `paper:${order.platform}:${this.tradeCounter}`;
 
-    // Build trade object conditionally to handle optional properties
     const trade: Trade = {
       id: tradeId,
       platform: order.platform,
@@ -438,20 +422,6 @@ export class PaperTradingEngine extends EventEmitter {
       fee,
       executedAt: new Date(),
     };
-
-    // Always set realizedPnl for SELL trades (even if 0) so performance calculator
-    // can identify closing trades. BUY trades will have realizedPnl = 0 (undefined).
-    if (order.side === ORDER_SIDES.SELL) {
-      trade.realizedPnl = realizedPnl;
-    } else if (realizedPnl !== 0) {
-      // For BUY trades, only set if non-zero (shouldn't happen, but just in case)
-      trade.realizedPnl = realizedPnl;
-    }
-
-    // Copy strategyId from order if present
-    if (order.strategyId) {
-      trade.strategyId = order.strategyId;
-    }
 
     this.trades.push(trade);
 

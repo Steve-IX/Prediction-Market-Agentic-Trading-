@@ -98,7 +98,6 @@ export class SignalExecutor extends EventEmitter {
         type: ORDER_TYPES.GTC, // Good-til-cancelled limit order
         price: this.calculateLimitPrice(signal),
         size: signal.size,
-        strategyId: signal.strategy, // Pass strategy ID from signal
       });
 
       const executionTimeMs = Date.now() - startTime;

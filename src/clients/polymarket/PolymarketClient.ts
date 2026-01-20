@@ -196,6 +196,10 @@ export class PolymarketClient implements IPlatformClient {
         ? 'Auto-deriving API credentials after failed validation...' 
         : 'No L2 API credentials provided, attempting to derive...');
       
+      // Note: The SDK's createOrDeriveApiKey() will first try to CREATE a new key (may log 400 error),
+      // then fall back to DERIVING existing keys. The 400 error is expected and can be ignored.
+      this.log.debug('Note: SDK may log 400 error during createOrDeriveApiKey - this is expected behavior');
+      
       // Create temporary client to derive API credentials
       const tempClient = new ClobClient(this.config.host, this.config.chainId, this.signer);
 

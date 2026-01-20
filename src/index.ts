@@ -5,6 +5,7 @@ import { initializeDb, closeDb } from './database/index.js';
 import { PolymarketClient } from './clients/polymarket/index.js';
 import { KalshiClient } from './clients/kalshi/index.js';
 import { OrderManager } from './services/orderManager/index.js';
+import { SessionTracker } from './services/sessions/index.js';
 import { TradingEngine } from './tradingEngine.js';
 import { getMetrics, getContentType } from './utils/metrics.js';
 import type { AccountBalance } from './clients/shared/interfaces.js';
@@ -74,7 +75,8 @@ async function main(): Promise<void> {
   orderManager.registerClient(polymarket);
   orderManager.registerClient(kalshi);
 
-  // Initialize Trading Engine
+  // Initialize Session Tracker
+  let sessionTracker: SessionTracker | null = null;
   let tradingEngine: TradingEngine | null = null;
 
   if (config.features.enableWebSocket || config.features.enableCrossPlatformArb || config.features.enableSinglePlatformArb) {
@@ -93,6 +95,21 @@ async function main(): Promise<void> {
         log.error('Failed to initialize trading engine', { error });
       }
     }
+
+    // Initialize Session Tracker with callbacks
+    sessionTracker = new SessionTracker(
+      {
+        getBalance: async () => orderManager.getBalance(PLATFORMS.POLYMARKET),
+        getTrades: async (limit?: number) => orderManager.getTrades(limit),
+        getPositions: async () => orderManager.getPositions(),
+        getTradingState: () => ({
+          opportunitiesDetected: tradingEngine?.getState().opportunitiesDetected ?? 0,
+          executionsSucceeded: tradingEngine?.getState().executionsSucceeded ?? 0,
+        }),
+      },
+      isPaperTrading() ? 'paper' : 'live'
+    );
+    log.info('Session tracker initialized');
   }
 
   // Start API server
@@ -263,7 +280,7 @@ async function main(): Promise<void> {
   });
 
   // Start trading
-  app.post('/api/trading/start', async (_req, res) => {
+  app.post('/api/trading/start', async (req, res) => {
     if (!tradingEngine) {
       return res.status(404).json({ error: 'Trading engine not initialized' });
     }
@@ -275,8 +292,19 @@ async function main(): Promise<void> {
     }
 
     try {
+      // Start session tracking
+      const notes = req.body?.notes as string | undefined;
+      let session = null;
+      if (sessionTracker) {
+        session = await sessionTracker.startSession(notes);
+      }
+
       await tradingEngine.start();
-      res.json({ status: 'started', state: tradingEngine.getState() });
+      res.json({ 
+        status: 'started', 
+        state: tradingEngine.getState(),
+        session: session ? { id: session.id, startTime: session.startTime } : null,
+      });
       return;
     } catch (error) {
       res.status(500).json({
@@ -288,7 +316,7 @@ async function main(): Promise<void> {
   });
 
   // Stop trading
-  app.post('/api/trading/stop', async (_req, res) => {
+  app.post('/api/trading/stop', async (req, res) => {
     if (!tradingEngine) {
       return res.status(404).json({ error: 'Trading engine not initialized' });
     }
@@ -301,7 +329,29 @@ async function main(): Promise<void> {
 
     try {
       await tradingEngine.stop();
-      res.json({ status: 'stopped', state: tradingEngine.getState() });
+      
+      // End session tracking
+      const notes = req.body?.notes as string | undefined;
+      let session = null;
+      if (sessionTracker && sessionTracker.isSessionActive()) {
+        session = await sessionTracker.endSession(notes);
+      }
+
+      res.json({ 
+        status: 'stopped', 
+        state: tradingEngine.getState(),
+        session: session ? {
+          id: session.id,
+          startTime: session.startTime,
+          endTime: session.endTime,
+          durationHours: session.durationSeconds ? (session.durationSeconds / 3600).toFixed(2) : null,
+          netPnl: session.netPnl?.toFixed(2),
+          tradesExecuted: session.tradesExecuted,
+          winRate: session.winRate ? (session.winRate * 100).toFixed(1) + '%' : null,
+          profitFactor: session.profitFactor?.toFixed(2),
+          strategiesUsed: session.strategiesUsed,
+        } : null,
+      });
       return;
     } catch (error) {
       res.status(500).json({
@@ -498,6 +548,269 @@ async function main(): Promise<void> {
     }
   });
 
+  // ============================================
+  // Session Tracking Endpoints
+  // ============================================
+
+  // Get all sessions
+  app.get('/api/sessions', async (_req, res) => {
+    if (!sessionTracker) {
+      res.status(404).json({ error: 'Session tracker not initialized' });
+      return;
+    }
+
+    try {
+      const sessions = sessionTracker.getCompletedSessions();
+      const currentSession = await sessionTracker.getCurrentSession();
+
+      res.json({
+        current: currentSession ? {
+          id: currentSession.id,
+          startTime: currentSession.startTime,
+          durationHours: currentSession.durationSeconds ? (currentSession.durationSeconds / 3600).toFixed(2) : null,
+          netPnl: currentSession.netPnl?.toFixed(2),
+          tradesExecuted: currentSession.tradesExecuted,
+          isActive: currentSession.isActive,
+        } : null,
+        completed: sessions.map(s => ({
+          id: s.id,
+          startTime: s.startTime,
+          endTime: s.endTime,
+          durationHours: s.durationSeconds ? (s.durationSeconds / 3600).toFixed(2) : null,
+          netPnl: s.netPnl?.toFixed(2),
+          tradesExecuted: s.tradesExecuted,
+          winRate: s.winRate ? (s.winRate * 100).toFixed(1) + '%' : null,
+          profitFactor: s.profitFactor?.toFixed(2),
+          mode: s.mode,
+          notes: s.notes,
+        })),
+        count: sessions.length,
+      });
+    } catch (error) {
+      res.status(500).json({
+        error: 'Failed to fetch sessions',
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
+  // Get current session details
+  app.get('/api/sessions/current', async (_req, res) => {
+    if (!sessionTracker) {
+      res.status(404).json({ error: 'Session tracker not initialized' });
+      return;
+    }
+
+    try {
+      const session = await sessionTracker.getCurrentSession();
+      
+      if (!session) {
+        res.json({ active: false, session: null });
+        return;
+      }
+
+      res.json({
+        active: true,
+        session: {
+          id: session.id,
+          startTime: session.startTime,
+          durationHours: session.durationSeconds ? (session.durationSeconds / 3600).toFixed(2) : null,
+          startBalance: session.startBalance?.toFixed(2),
+          currentBalance: session.endBalance?.toFixed(2),
+          netPnl: session.netPnl?.toFixed(2),
+          tradesExecuted: session.tradesExecuted,
+          opportunitiesDetected: session.opportunitiesDetected,
+          executionsSucceeded: session.executionsSucceeded,
+          winRate: session.winRate ? (session.winRate * 100).toFixed(1) + '%' : null,
+          profitFactor: session.profitFactor?.toFixed(2),
+          maxDrawdown: session.maxDrawdown?.toFixed(2),
+          strategiesUsed: session.strategiesUsed,
+          pnlByStrategy: session.pnlByStrategy,
+          mode: session.mode,
+        },
+      });
+    } catch (error) {
+      res.status(500).json({
+        error: 'Failed to fetch current session',
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
+  // Get session by ID
+  app.get('/api/sessions/:id', async (req, res) => {
+    if (!sessionTracker) {
+      res.status(404).json({ error: 'Session tracker not initialized' });
+      return;
+    }
+
+    try {
+      const session = sessionTracker.getSession(req.params['id'] || '');
+      
+      if (!session) {
+        res.status(404).json({ error: 'Session not found' });
+        return;
+      }
+
+      res.json({
+        id: session.id,
+        startTime: session.startTime,
+        endTime: session.endTime,
+        durationHours: session.durationSeconds ? (session.durationSeconds / 3600).toFixed(2) : null,
+        startBalance: session.startBalance?.toFixed(2),
+        endBalance: session.endBalance?.toFixed(2),
+        netPnl: session.netPnl?.toFixed(2),
+        tradesExecuted: session.tradesExecuted,
+        opportunitiesDetected: session.opportunitiesDetected,
+        executionsSucceeded: session.executionsSucceeded,
+        winRate: session.winRate ? (session.winRate * 100).toFixed(1) + '%' : null,
+        profitFactor: session.profitFactor?.toFixed(2),
+        sharpeRatio: session.sharpeRatio?.toFixed(2),
+        maxDrawdown: session.maxDrawdown?.toFixed(2),
+        maxDrawdownPercent: session.maxDrawdownPercent?.toFixed(2) + '%',
+        strategiesUsed: session.strategiesUsed,
+        pnlByStrategy: session.pnlByStrategy,
+        mode: session.mode,
+        notes: session.notes,
+        isActive: session.isActive,
+      });
+    } catch (error) {
+      res.status(500).json({
+        error: 'Failed to fetch session',
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
+  // Get session summary statistics
+  app.get('/api/sessions/stats/summary', async (_req, res) => {
+    if (!sessionTracker) {
+      res.status(404).json({ error: 'Session tracker not initialized' });
+      return;
+    }
+
+    try {
+      const summary = sessionTracker.getSummary();
+      
+      res.json({
+        totalSessions: summary.totalSessions,
+        activeSessions: summary.activeSessions,
+        totalTrades: summary.totalTrades,
+        totalPnl: summary.totalPnl.toFixed(2),
+        avgPnlPerSession: summary.avgPnlPerSession.toFixed(2),
+        avgWinRate: (summary.avgWinRate * 100).toFixed(1) + '%',
+        avgProfitFactor: summary.avgProfitFactor.toFixed(2),
+        totalDurationHours: summary.totalDurationHours.toFixed(2),
+        bestSession: summary.bestSession ? {
+          id: summary.bestSession.id,
+          netPnl: summary.bestSession.netPnl?.toFixed(2),
+          startTime: summary.bestSession.startTime,
+        } : null,
+        worstSession: summary.worstSession ? {
+          id: summary.worstSession.id,
+          netPnl: summary.worstSession.netPnl?.toFixed(2),
+          startTime: summary.worstSession.startTime,
+        } : null,
+      });
+    } catch (error) {
+      res.status(500).json({
+        error: 'Failed to calculate session summary',
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
+  // Export sessions data
+  app.get('/api/sessions/export', async (_req, res) => {
+    if (!sessionTracker) {
+      res.status(404).json({ error: 'Session tracker not initialized' });
+      return;
+    }
+
+    try {
+      const json = sessionTracker.exportToJson();
+      res.setHeader('Content-Type', 'application/json');
+      res.setHeader('Content-Disposition', `attachment; filename="sessions-${new Date().toISOString().split('T')[0]}.json"`);
+      res.send(json);
+    } catch (error) {
+      res.status(500).json({
+        error: 'Failed to export sessions',
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
+  // Manually start a session (if trading already running)
+  app.post('/api/sessions/start', async (req, res) => {
+    if (!sessionTracker) {
+      res.status(404).json({ error: 'Session tracker not initialized' });
+      return;
+    }
+
+    try {
+      const notes = req.body?.notes as string | undefined;
+      const session = await sessionTracker.startSession(notes);
+      
+      res.json({
+        status: 'session_started',
+        session: {
+          id: session.id,
+          startTime: session.startTime,
+          startBalance: session.startBalance?.toFixed(2),
+          mode: session.mode,
+        },
+      });
+    } catch (error) {
+      res.status(500).json({
+        error: 'Failed to start session',
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
+  // Manually end a session
+  app.post('/api/sessions/end', async (req, res) => {
+    if (!sessionTracker) {
+      res.status(404).json({ error: 'Session tracker not initialized' });
+      return;
+    }
+
+    if (!sessionTracker.isSessionActive()) {
+      res.status(400).json({ error: 'No active session to end' });
+      return;
+    }
+
+    try {
+      const notes = req.body?.notes as string | undefined;
+      const session = await sessionTracker.endSession(notes);
+      
+      if (!session) {
+        res.status(400).json({ error: 'Failed to end session' });
+        return;
+      }
+
+      res.json({
+        status: 'session_ended',
+        session: {
+          id: session.id,
+          startTime: session.startTime,
+          endTime: session.endTime,
+          durationHours: session.durationSeconds ? (session.durationSeconds / 3600).toFixed(2) : null,
+          netPnl: session.netPnl?.toFixed(2),
+          tradesExecuted: session.tradesExecuted,
+          winRate: session.winRate ? (session.winRate * 100).toFixed(1) + '%' : null,
+          profitFactor: session.profitFactor?.toFixed(2),
+          strategiesUsed: session.strategiesUsed,
+        },
+      });
+    } catch (error) {
+      res.status(500).json({
+        error: 'Failed to end session',
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
   app.listen(config.api.port, () => {
     log.info(`API server listening on port ${config.api.port}`);
   });
@@ -551,9 +864,16 @@ async function main(): Promise<void> {
     tradingStop: 'POST /api/trading/stop',
     tradingScan: 'POST /api/trading/scan',
     killSwitch: 'POST /api/kill-switch',
-    // New debug endpoints
     tradingDebug: 'GET /api/trading/debug',
     marketAnalysis: 'GET /api/trading/markets/analysis',
+    // Session tracking endpoints
+    sessions: 'GET /api/sessions',
+    sessionCurrent: 'GET /api/sessions/current',
+    sessionById: 'GET /api/sessions/:id',
+    sessionSummary: 'GET /api/sessions/stats/summary',
+    sessionExport: 'GET /api/sessions/export',
+    sessionStart: 'POST /api/sessions/start',
+    sessionEnd: 'POST /api/sessions/end',
   });
 }
 

@@ -28,8 +28,8 @@ const DEFAULT_CONFIG: StrategyManagerConfig = {
   enableOrderbookImbalance: true,
   enableProbabilitySum: true, // NEW: Enabled by default - most reliable strategy
   enableEndgame: true, // NEW: Enabled by default
-  maxConcurrentSignals: 5, // Increased from 3
-  signalCooldownMs: 15000, // Reduced from 30 seconds to 15 seconds
+  maxConcurrentSignals: 3, // Reduced to prevent over-trading
+  signalCooldownMs: 300000, // 5 minutes - prevent churning same market
 };
 
 /**
@@ -61,6 +61,10 @@ export class StrategyManager extends EventEmitter {
 
   // Signal management
   private signalCooldowns: Map<string, Date> = new Map();
+  
+  // Anti-churn: Track recently traded markets with longer cooldown after execution
+  private recentlyTradedMarkets: Map<string, { executedAt: Date; side: string }> = new Map();
+  private static readonly POST_TRADE_COOLDOWN_MS = 600000; // 10 minutes after a trade
   
   // Debug tracking
   private lastScanStats: {
@@ -313,6 +317,7 @@ export class StrategyManager extends EventEmitter {
 
   /**
    * Mark a signal as executed (removes from active)
+   * Sets a longer cooldown after execution to prevent churning
    */
   markSignalExecuted(signal: TradingSignal): void {
     this.probabilitySumStrategy.clearSignal(signal.marketId);
@@ -320,7 +325,24 @@ export class StrategyManager extends EventEmitter {
     this.momentumStrategy.clearSignal(signal.marketId);
     this.meanReversionStrategy.clearSignal(signal.marketId);
     this.orderbookImbalanceStrategy.clearSignal(signal.marketId);
-    this.setCooldown(signal.marketId);
+    
+    // Track recently traded markets with longer cooldown
+    this.recentlyTradedMarkets.set(signal.marketId, {
+      executedAt: new Date(),
+      side: signal.side,
+    });
+    
+    // Set longer post-trade cooldown
+    this.signalCooldowns.set(
+      signal.marketId,
+      new Date(Date.now() + StrategyManager.POST_TRADE_COOLDOWN_MS)
+    );
+    
+    this.log.info('Post-trade cooldown set', {
+      market: signal.market.title.substring(0, 40),
+      cooldownMinutes: StrategyManager.POST_TRADE_COOLDOWN_MS / 60000,
+      side: signal.side,
+    });
   }
 
   /**
@@ -455,7 +477,17 @@ export class StrategyManager extends EventEmitter {
   private isOnCooldown(marketId: string): boolean {
     const cooldownUntil = this.signalCooldowns.get(marketId);
     if (!cooldownUntil) return false;
-    return new Date() < cooldownUntil;
+    
+    if (new Date() < cooldownUntil) {
+      // Check if this is a recently traded market
+      const recentTrade = this.recentlyTradedMarkets.get(marketId);
+      if (recentTrade) {
+        // Silently skip - don't spam logs
+        return true;
+      }
+      return true;
+    }
+    return false;
   }
 
   private setCooldown(marketId: string): void {
@@ -477,6 +509,14 @@ export class StrategyManager extends EventEmitter {
     for (const [marketId, until] of this.signalCooldowns) {
       if (until < now) {
         this.signalCooldowns.delete(marketId);
+      }
+    }
+    
+    // Clean expired recently traded markets (keep for 30 minutes for debugging)
+    const thirtyMinutesAgo = new Date(Date.now() - 30 * 60 * 1000);
+    for (const [marketId, data] of this.recentlyTradedMarkets) {
+      if (data.executedAt < thirtyMinutesAgo) {
+        this.recentlyTradedMarkets.delete(marketId);
       }
     }
   }

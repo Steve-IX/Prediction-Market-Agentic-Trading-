@@ -637,6 +637,26 @@ async function main(): Promise<void> {
     }
   });
 
+  // Export sessions data (must come before /:id route)
+  app.get('/api/sessions/export', async (_req, res) => {
+    if (!sessionTracker) {
+      res.status(404).json({ error: 'Session tracker not initialized' });
+      return;
+    }
+
+    try {
+      const json = sessionTracker.exportToJson();
+      res.setHeader('Content-Type', 'application/json');
+      res.setHeader('Content-Disposition', `attachment; filename="sessions-${new Date().toISOString().split('T')[0]}.json"`);
+      res.send(json);
+    } catch (error) {
+      res.status(500).json({
+        error: 'Failed to export sessions',
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
   // Get session by ID
   app.get('/api/sessions/:id', async (req, res) => {
     if (!sessionTracker) {
@@ -715,26 +735,6 @@ async function main(): Promise<void> {
     } catch (error) {
       res.status(500).json({
         error: 'Failed to calculate session summary',
-        message: error instanceof Error ? error.message : String(error),
-      });
-    }
-  });
-
-  // Export sessions data
-  app.get('/api/sessions/export', async (_req, res) => {
-    if (!sessionTracker) {
-      res.status(404).json({ error: 'Session tracker not initialized' });
-      return;
-    }
-
-    try {
-      const json = sessionTracker.exportToJson();
-      res.setHeader('Content-Type', 'application/json');
-      res.setHeader('Content-Disposition', `attachment; filename="sessions-${new Date().toISOString().split('T')[0]}.json"`);
-      res.send(json);
-    } catch (error) {
-      res.status(500).json({
-        error: 'Failed to export sessions',
         message: error instanceof Error ? error.message : String(error),
       });
     }

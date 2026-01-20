@@ -439,8 +439,12 @@ export class PaperTradingEngine extends EventEmitter {
       executedAt: new Date(),
     };
 
-    // Only set realizedPnl if non-zero (for SELL trades that close positions)
-    if (realizedPnl !== 0) {
+    // Always set realizedPnl for SELL trades (even if 0) so performance calculator
+    // can identify closing trades. BUY trades will have realizedPnl = 0 (undefined).
+    if (order.side === ORDER_SIDES.SELL) {
+      trade.realizedPnl = realizedPnl;
+    } else if (realizedPnl !== 0) {
+      // For BUY trades, only set if non-zero (shouldn't happen, but just in case)
       trade.realizedPnl = realizedPnl;
     }
 

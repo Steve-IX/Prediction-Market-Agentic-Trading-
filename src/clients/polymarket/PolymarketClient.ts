@@ -92,21 +92,43 @@ export class PolymarketClient implements IPlatformClient {
 
         // Verify the credentials work by making a test request
         // Note: The SDK may log errors to console but not always throw exceptions
-        // We need to check the actual response and catch any errors
+        // The SDK sometimes returns error objects instead of throwing, so we must check both
         let verificationPassed = false;
         try {
           const balanceResult = await this.client.getBalanceAllowance({ asset_type: AssetType.COLLATERAL });
           
           // Check if we got a valid response (not null/undefined, has expected structure)
-          if (balanceResult && typeof balanceResult === 'object' && 'balance' in balanceResult) {
-            verificationPassed = true;
-            this.log.info('L2 API credentials verified successfully', {
-              balance: (balanceResult as { balance?: string | number }).balance,
-            });
+          if (balanceResult && typeof balanceResult === 'object') {
+            const resultObj = balanceResult as unknown as Record<string, unknown>;
+            
+            // FIRST: Check if this is an error response (SDK returns error object instead of throwing)
+            if (resultObj['error'] || resultObj['status'] === 401 || resultObj['statusText'] === 'Unauthorized') {
+              const errorMsg = String(resultObj['error'] || 'API returned error status');
+              const errorStatus = resultObj['status'];
+              this.log.error('L2 API credentials returned error response', {
+                error: errorMsg,
+                status: errorStatus,
+                walletAddress: this.signer.address,
+              });
+              // Throw to trigger the catch block for proper handling
+              throw new Error(`API Error: ${errorMsg} (status: ${errorStatus})`);
+            }
+            
+            // THEN: Check for valid balance response
+            if ('balance' in resultObj) {
+              verificationPassed = true;
+              this.log.info('L2 API credentials verified successfully', {
+                balance: resultObj['balance'],
+              });
+            } else {
+              // Response has no error and no balance - unexpected format
+              this.log.warn('Balance response format unexpected (no balance field)', { result: balanceResult });
+              throw new Error('Unexpected balance response format: missing balance field');
+            }
           } else {
-            // Unexpected response format
-            this.log.warn('Balance response format unexpected', { result: balanceResult });
-            throw new Error('Unexpected balance response format');
+            // Null/undefined response
+            this.log.warn('Balance response was null or not an object', { result: balanceResult });
+            throw new Error('Unexpected balance response: null or invalid type');
           }
         } catch (verifyError) {
           // Error occurred during verification
@@ -114,17 +136,18 @@ export class PolymarketClient implements IPlatformClient {
           const errMsg = verifyError instanceof Error ? verifyError.message : String(verifyError);
           const errStr = JSON.stringify(verifyError);
           const errStack = verifyError instanceof Error ? verifyError.stack : '';
-          const fullErrorString = errStr + ' ' + errStack;
+          const fullErrorString = `${errMsg} ${errStr} ${errStack}`;
           
           // Check for 401 Unauthorized - likely wrong wallet or invalid keys
-          if (
+          const is401Error = 
             fullErrorString.includes('401') || 
             fullErrorString.includes('Unauthorized') || 
             fullErrorString.includes('Invalid api key') ||
-            errMsg.includes('401') ||
-            errMsg.includes('Unauthorized') ||
-            errMsg.includes('Invalid')
-          ) {
+            fullErrorString.includes('Invalid API') ||
+            errMsg.toLowerCase().includes('unauthorized') ||
+            errMsg.toLowerCase().includes('invalid');
+            
+          if (is401Error) {
             this.log.error('L2 API credentials INVALID - 401 Unauthorized detected!', {
               walletFromPrivateKey: this.signer.address,
               error: errMsg,

@@ -683,24 +683,25 @@ export class TradingEngine extends EventEmitter {
 
   private subscribeToTrackedMarkets(): void {
     // Subscribe to Polymarket markets
+    // INCREASED from 20 to 100 for more trading opportunities
+    const MAX_SUBSCRIPTIONS = 100;
+    
     const polymarketMarkets = this.markets.get(PLATFORMS.POLYMARKET) ?? [];
-    for (const market of polymarketMarkets.slice(0, 20)) {
-      // Limit to top 20 for now
+    for (const market of polymarketMarkets.slice(0, MAX_SUBSCRIPTIONS)) {
       const outcomeIds = market.outcomes.map((o) => o.externalId);
       this.marketDataService.trackMarket(PLATFORMS.POLYMARKET, market.externalId, outcomeIds);
     }
 
     // Subscribe to Kalshi markets
     const kalshiMarkets = this.markets.get(PLATFORMS.KALSHI) ?? [];
-    for (const market of kalshiMarkets.slice(0, 20)) {
-      // Limit to top 20 for now
+    for (const market of kalshiMarkets.slice(0, MAX_SUBSCRIPTIONS)) {
       const outcomeIds = market.outcomes.map((o) => o.externalId);
       this.marketDataService.trackMarket(PLATFORMS.KALSHI, market.externalId, outcomeIds);
     }
 
     this.log.info('Subscribed to tracked markets', {
-      polymarket: Math.min(polymarketMarkets.length, 20),
-      kalshi: Math.min(kalshiMarkets.length, 20),
+      polymarket: Math.min(polymarketMarkets.length, MAX_SUBSCRIPTIONS),
+      kalshi: Math.min(kalshiMarkets.length, MAX_SUBSCRIPTIONS),
     });
   }
 }

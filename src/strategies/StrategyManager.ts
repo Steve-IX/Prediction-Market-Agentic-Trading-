@@ -7,6 +7,7 @@ import { OrderbookImbalanceStrategy } from './momentum/OrderbookImbalanceStrateg
 import { ProbabilitySumStrategy } from './prediction/ProbabilitySumStrategy.js';
 import { EndgameStrategy } from './prediction/EndgameStrategy.js';
 import { logger, type Logger } from '../utils/logger.js';
+import { getConfig } from '../config/index.js';
 
 /**
  * Strategy Manager Configuration
@@ -74,17 +75,48 @@ export class StrategyManager extends EventEmitter {
     this.log = logger('StrategyManager');
     this.config = { ...DEFAULT_CONFIG, ...config };
 
+    // Get strategy config values from app config
+    const appConfig = getConfig();
+    const strategyConfig = appConfig.strategies;
+
     // Initialize components (reduced interval for faster data collection)
     this.priceTracker = new PriceHistoryTracker(1000, 500);
     
-    // Technical analysis strategies
-    this.momentumStrategy = new MomentumStrategy();
-    this.meanReversionStrategy = new MeanReversionStrategy();
-    this.orderbookImbalanceStrategy = new OrderbookImbalanceStrategy();
+    // Technical analysis strategies - pass config values!
+    this.momentumStrategy = new MomentumStrategy({
+      minMomentum: strategyConfig.momentumMinMomentum,
+      minChangePercent: strategyConfig.momentumMinChangePercent,
+      maxPositionSize: strategyConfig.maxPositionSize,
+      minPositionSize: strategyConfig.minPositionSize,
+    });
     
-    // NEW: Prediction market-specific strategies
-    this.probabilitySumStrategy = new ProbabilitySumStrategy();
-    this.endgameStrategy = new EndgameStrategy();
+    this.meanReversionStrategy = new MeanReversionStrategy({
+      minDeviation: strategyConfig.meanReversionMinDeviation,
+      maxDeviation: strategyConfig.meanReversionMaxDeviation,
+      maxPositionSize: strategyConfig.maxPositionSize,
+      minPositionSize: strategyConfig.minPositionSize,
+    });
+    
+    this.orderbookImbalanceStrategy = new OrderbookImbalanceStrategy({
+      minImbalanceRatio: strategyConfig.orderbookImbalanceRatio,
+      maxPositionSize: strategyConfig.maxPositionSize,
+      minPositionSize: strategyConfig.minPositionSize,
+    });
+    
+    // Prediction market-specific strategies
+    this.probabilitySumStrategy = new ProbabilitySumStrategy({
+      minMispricingPercent: strategyConfig.probabilitySumMinMispricingPercent,
+      maxPositionSize: strategyConfig.maxPositionSize,
+      minPositionSize: strategyConfig.minPositionSize,
+    });
+    
+    this.endgameStrategy = new EndgameStrategy({
+      minProbability: strategyConfig.endgameMinProbability,
+      maxHoursToResolution: strategyConfig.endgameMaxHoursToResolution,
+      minAnnualizedReturn: strategyConfig.endgameMinAnnualizedReturn,
+      maxPositionSize: strategyConfig.maxPositionSize,
+      minPositionSize: strategyConfig.minPositionSize,
+    });
 
     // Forward signals from strategies
     this.setupEventForwarding();
@@ -95,6 +127,14 @@ export class StrategyManager extends EventEmitter {
       enableOrderbookImbalance: this.config.enableOrderbookImbalance,
       enableProbabilitySum: this.config.enableProbabilitySum,
       enableEndgame: this.config.enableEndgame,
+      // Log actual config values being used
+      momentumConfig: {
+        minMomentum: strategyConfig.momentumMinMomentum,
+        minChangePercent: strategyConfig.momentumMinChangePercent,
+      },
+      meanReversionConfig: {
+        minDeviation: strategyConfig.meanReversionMinDeviation,
+      },
     });
   }
 

@@ -391,7 +391,7 @@ async function main(): Promise<void> {
         deviation: string;
       }> = [];
       
-      for (const market of polymarketMarkets.slice(0, 20)) {
+      for (const market of polymarketMarkets.slice(0, 100)) {
         if (market.outcomes.length === 2) {
           const yesOutcome = market.outcomes.find(o => o.type === 'yes');
           const noOutcome = market.outcomes.find(o => o.type === 'no');

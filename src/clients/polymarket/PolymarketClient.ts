@@ -71,12 +71,19 @@ export class PolymarketClient implements IPlatformClient {
       // Check if L2 API credentials are provided directly
       if (this.config.apiKey && this.config.apiSecret && this.config.apiPassphrase) {
         // Use provided L2 API credentials directly
-        this.log.info('Using provided L2 API credentials');
+        this.log.info('Using provided L2 API credentials', {
+          apiKey: `${this.config.apiKey.substring(0, 8)}...`,
+          apiKeyLength: this.config.apiKey.length,
+          secretLength: this.config.apiSecret.length,
+          passphraseLength: this.config.apiPassphrase.length,
+          walletAddress: this.signer.address,
+        });
         
+        // Trim whitespace from credentials (common issue with env vars)
         const apiCreds = {
-          key: this.config.apiKey,
-          secret: this.config.apiSecret,
-          passphrase: this.config.apiPassphrase,
+          key: this.config.apiKey.trim(),
+          secret: this.config.apiSecret.trim(),
+          passphrase: this.config.apiPassphrase.trim(),
         };
 
         // Initialize trading client with provided credentials
@@ -506,7 +513,33 @@ export class PolymarketClient implements IPlatformClient {
       observeApiLatency(this.platform, 'getBalance', durationMs);
       recordApiRequest(this.platform, 'getBalance', 'error');
 
-      this.log.error('Failed to get balance', { error });
+      // Enhanced error logging for authentication issues
+      if (error && typeof error === 'object' && 'status' in error) {
+        const statusError = error as { status?: number; statusText?: string; data?: unknown };
+        if (statusError.status === 401) {
+          this.log.error('Authentication failed (401 Unauthorized)', {
+            status: statusError.status,
+            statusText: statusError.statusText,
+            data: statusError.data,
+            walletAddress: this.signer?.address,
+            hasApiKey: !!this.config.apiKey,
+            hasApiSecret: !!this.config.apiSecret,
+            hasApiPassphrase: !!this.config.apiPassphrase,
+            hint: 'Verify POLYMARKET_API_KEY, POLYMARKET_API_SECRET, and POLYMARKET_API_PASSPHRASE in Railway match your Polymarket account',
+          });
+        } else {
+          this.log.error('Failed to get balance', {
+            status: statusError.status,
+            statusText: statusError.statusText,
+            data: statusError.data,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      } else {
+        this.log.error('Failed to get balance', {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
       throw error;
     }
   }

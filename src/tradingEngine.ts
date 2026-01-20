@@ -3,7 +3,7 @@ import type { Config } from './config/schema.js';
 import { getConfig } from './config/index.js';
 import { PLATFORMS } from './config/constants.js';
 import type { Platform } from './config/constants.js';
-import type { NormalizedMarket } from './clients/shared/interfaces.js';
+import type { NormalizedMarket, OrderBook } from './clients/shared/interfaces.js';
 import { PolymarketClient } from './clients/polymarket/PolymarketClient.js';
 import { KalshiClient } from './clients/kalshi/KalshiClient.js';
 import { PolymarketWebSocket } from './clients/polymarket/PolymarketWebSocket.js';
@@ -13,6 +13,9 @@ import { OrderManager } from './services/orderManager/index.js';
 import { MarketMatcher, type MarketPair } from './services/matching/index.js';
 import { ArbitrageDetector, type ArbitrageOpportunity } from './strategies/arbitrage/ArbitrageDetector.js';
 import { ArbitrageExecutor, type ExecutionResult } from './strategies/arbitrage/ArbitrageExecutor.js';
+import { StrategyManager } from './strategies/StrategyManager.js';
+import { SignalExecutor, type SignalExecutionResult } from './strategies/SignalExecutor.js';
+import type { TradingSignal } from './strategies/momentum/MomentumStrategy.js';
 import { KillSwitch } from './risk/KillSwitch.js';
 import { logger, type Logger } from './utils/logger.js';
 import { arbitrageOpportunities, arbitrageExecutions, arbitrageProfit } from './utils/metrics.js';
@@ -94,9 +97,14 @@ export class TradingEngine extends EventEmitter {
   // Strategies
   private arbitrageDetector: ArbitrageDetector;
   private arbitrageExecutor: ArbitrageExecutor;
+  private strategyManager: StrategyManager;
+  private signalExecutor: SignalExecutor;
 
   // Risk
   private killSwitch: KillSwitch;
+  
+  // Orderbook cache for strategies
+  private orderbooks: Map<string, OrderBook> = new Map();
 
   // Tracking
   private markets: Map<Platform, NormalizedMarket[]> = new Map();
@@ -142,6 +150,15 @@ export class TradingEngine extends EventEmitter {
     // Create strategies
     this.arbitrageDetector = new ArbitrageDetector();
     this.arbitrageExecutor = new ArbitrageExecutor(this.orderManager);
+    
+    // Create new strategy components
+    this.strategyManager = new StrategyManager({
+      enableMomentum: this.appConfig.features.enableMomentumStrategy,
+      enableMeanReversion: this.appConfig.features.enableMeanReversionStrategy,
+      enableOrderbookImbalance: this.appConfig.features.enableOrderbookImbalanceStrategy,
+      signalCooldownMs: this.appConfig.strategies.signalCooldownMs,
+    });
+    this.signalExecutor = new SignalExecutor(this.orderManager);
 
     // Create risk management
     this.killSwitch = new KillSwitch(this.orderManager);
@@ -350,6 +367,30 @@ export class TradingEngine extends EventEmitter {
       this.log.error('Execution failed', { error: error.message });
     });
 
+    // Strategy manager signal events
+    this.strategyManager.on('signal', (signal: TradingSignal) => {
+      this.log.info('New trading signal', {
+        strategy: signal.strategy,
+        market: signal.market.title,
+        side: signal.side,
+        confidence: signal.confidence.toFixed(2),
+      });
+      this.emit('tradingSignal', signal);
+    });
+
+    // Signal executor events
+    this.signalExecutor.on('executed', (result: SignalExecutionResult) => {
+      this.onSignalExecuted(result);
+    });
+
+    this.signalExecutor.on('executionFailed', ({ signal, error }) => {
+      this.log.error('Signal execution failed', {
+        signal: signal.id,
+        strategy: signal.strategy,
+        error,
+      });
+    });
+
     // Kill switch events
     this.killSwitch.on('activated', ({ trigger, message }) => {
       this.log.error('Kill switch activated', { trigger, message });
@@ -362,7 +403,30 @@ export class TradingEngine extends EventEmitter {
     });
   }
 
-  private async onPriceUpdate(_update: PriceUpdate): Promise<void> {
+  private async onPriceUpdate(update: PriceUpdate): Promise<void> {
+    // Track price history for strategies
+    if (update.bestBid !== undefined && update.bestAsk !== undefined) {
+      const midPrice = (update.bestBid + update.bestAsk) / 2;
+      this.strategyManager.processPriceUpdate(
+        update.marketId,
+        midPrice,
+        undefined, // volume not in update
+        update.bidSize,
+        update.askSize
+      );
+
+      // Cache orderbook for strategy analysis
+      if (update.bestBid && update.bestAsk) {
+        this.orderbooks.set(update.outcomeId, {
+          marketId: update.marketId,
+          outcomeId: update.outcomeId,
+          bids: [{ price: update.bestBid, size: update.bidSize || 0 }],
+          asks: [{ price: update.bestAsk, size: update.askSize || 0 }],
+          timestamp: new Date(),
+        });
+      }
+    }
+
     // Skip if not running or processing another update
     if (!this.state.isRunning || this.isProcessingUpdate) {
       return;
@@ -399,7 +463,7 @@ export class TradingEngine extends EventEmitter {
     try {
       const opportunities: ArbitrageOpportunity[] = [];
 
-      // Single-platform arbitrage
+      // Single-platform arbitrage (legacy)
       if (this.config.enableSinglePlatformArb) {
         const polymarketMarkets = this.markets.get(PLATFORMS.POLYMARKET) ?? [];
         const kalshiMarkets = this.markets.get(PLATFORMS.KALSHI) ?? [];
@@ -412,13 +476,35 @@ export class TradingEngine extends EventEmitter {
         opportunities.push(...singlePlatformOpps);
       }
 
-      // Cross-platform arbitrage
+      // Cross-platform arbitrage (legacy)
       if (this.config.enableCrossPlatformArb && this.matchedPairs.length > 0) {
         const crossPlatformOpps = this.arbitrageDetector.scanCrossPlatform(this.matchedPairs);
         opportunities.push(...crossPlatformOpps);
       }
 
-      // Update metrics and state
+      // NEW: Run active trading strategies
+      const polymarketMarkets = this.markets.get(PLATFORMS.POLYMARKET) ?? [];
+      const tradingSignals = this.strategyManager.scanMarkets(polymarketMarkets, this.orderbooks);
+
+      // Execute trading signals (priority over arbitrage)
+      if (tradingSignals.length > 0) {
+        this.state.opportunitiesDetected += tradingSignals.length;
+
+        this.log.info('Trading signals generated', {
+          count: tradingSignals.length,
+          strategies: [...new Set(tradingSignals.map((s) => s.strategy))].join(', '),
+          bestConfidence: tradingSignals.reduce((max, s) => Math.max(max, s.confidence), 0).toFixed(2),
+        });
+
+        // Execute best signal
+        const bestSignal = tradingSignals[0];
+        if (bestSignal && !this.signalExecutor.hasPendingExecutions()) {
+          await this.signalExecutor.execute(bestSignal);
+          this.strategyManager.markSignalExecuted(bestSignal);
+        }
+      }
+
+      // Update metrics and state for arbitrage
       if (opportunities.length > 0) {
         this.state.opportunitiesDetected += opportunities.length;
 
@@ -426,12 +512,12 @@ export class TradingEngine extends EventEmitter {
           arbitrageOpportunities.labels(opp.type).inc();
         }
 
-        this.log.debug('Opportunities detected', {
+        this.log.debug('Arbitrage opportunities detected', {
           count: opportunities.length,
           bestProfit: opportunities.reduce((max, o) => Math.max(max, o.maxProfit), 0),
         });
 
-        // Execute best opportunity
+        // Execute best arbitrage opportunity
         await this.executeBestOpportunity(opportunities);
       }
 
@@ -506,6 +592,26 @@ export class TradingEngine extends EventEmitter {
       profit: result.profit,
       executionTimeMs: result.executionTimeMs,
     });
+  }
+
+  private onSignalExecuted(result: SignalExecutionResult): void {
+    // Update state
+    this.state.executionsAttempted++;
+    if (result.success) {
+      this.state.executionsSucceeded++;
+      this.log.info('Signal executed', {
+        strategy: result.signal.strategy,
+        market: result.signal.market.title,
+        side: result.signal.side,
+        filledSize: result.filledSize,
+        executionTimeMs: result.executionTimeMs,
+      });
+    }
+
+    // Start cooldown after execution
+    this.cooldownUntil = new Date(Date.now() + this.config.cooldownAfterExecutionMs);
+
+    this.emit('signalExecuted', result);
   }
 
   private async refreshMarkets(): Promise<void> {

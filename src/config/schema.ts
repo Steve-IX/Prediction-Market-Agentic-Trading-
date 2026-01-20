@@ -68,6 +68,31 @@ const FeatureFlagsSchema = z.object({
   enableSinglePlatformArb: z.boolean().default(true),
   enableMarketMaking: z.boolean().default(false),
   enableWebSocket: z.boolean().default(true),
+  // New trading strategies
+  enableMomentumStrategy: z.boolean().default(true),
+  enableMeanReversionStrategy: z.boolean().default(true),
+  enableOrderbookImbalanceStrategy: z.boolean().default(true),
+});
+
+// Strategy configuration schema
+const StrategyConfigSchema = z.object({
+  // Momentum strategy
+  momentumMinMomentum: z.number().min(0).max(1).default(0.4),
+  momentumMinChangePercent: z.number().min(0).default(2),
+  
+  // Mean reversion strategy
+  meanReversionMinDeviation: z.number().min(0).default(3),
+  meanReversionMaxDeviation: z.number().min(0).default(15),
+  
+  // Orderbook imbalance strategy
+  orderbookImbalanceRatio: z.number().min(1).default(2),
+  
+  // Position sizing
+  maxPositionSize: z.number().positive().default(100),
+  minPositionSize: z.number().positive().default(10),
+  
+  // Cooldown between signals on same market
+  signalCooldownMs: z.number().positive().default(30000),
 });
 
 // Anthropic configuration schema
@@ -90,6 +115,7 @@ export const ConfigSchema = z.object({
   trading: TradingConfigSchema,
   api: ApiConfigSchema,
   features: FeatureFlagsSchema,
+  strategies: StrategyConfigSchema,
   anthropic: AnthropicConfigSchema,
 });
 
@@ -103,4 +129,5 @@ export type RiskConfig = z.infer<typeof RiskConfigSchema>;
 export type TradingConfig = z.infer<typeof TradingConfigSchema>;
 export type ApiConfig = z.infer<typeof ApiConfigSchema>;
 export type FeatureFlags = z.infer<typeof FeatureFlagsSchema>;
+export type StrategyConfig = z.infer<typeof StrategyConfigSchema>;
 export type AnthropicConfig = z.infer<typeof AnthropicConfigSchema>;

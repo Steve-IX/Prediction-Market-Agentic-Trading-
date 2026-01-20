@@ -100,6 +100,21 @@ function buildConfigFromEnv(): unknown {
       enableSinglePlatformArb: parseBoolean(env['ENABLE_SINGLE_PLATFORM_ARB'], true),
       enableMarketMaking: parseBoolean(env['ENABLE_MARKET_MAKING'], false),
       enableWebSocket: parseBoolean(env['ENABLE_WEBSOCKET'], true),
+      // New strategies - enabled by default for better trading
+      enableMomentumStrategy: parseBoolean(env['ENABLE_MOMENTUM_STRATEGY'], true),
+      enableMeanReversionStrategy: parseBoolean(env['ENABLE_MEAN_REVERSION_STRATEGY'], true),
+      enableOrderbookImbalanceStrategy: parseBoolean(env['ENABLE_ORDERBOOK_IMBALANCE_STRATEGY'], true),
+    },
+
+    strategies: {
+      momentumMinMomentum: parseNumber(env['MOMENTUM_MIN_MOMENTUM'], 0.4),
+      momentumMinChangePercent: parseNumber(env['MOMENTUM_MIN_CHANGE_PERCENT'], 2),
+      meanReversionMinDeviation: parseNumber(env['MEAN_REVERSION_MIN_DEVIATION'], 3),
+      meanReversionMaxDeviation: parseNumber(env['MEAN_REVERSION_MAX_DEVIATION'], 15),
+      orderbookImbalanceRatio: parseNumber(env['ORDERBOOK_IMBALANCE_RATIO'], 2),
+      maxPositionSize: parseNumber(env['STRATEGY_MAX_POSITION_SIZE'], 100),
+      minPositionSize: parseNumber(env['STRATEGY_MIN_POSITION_SIZE'], 10),
+      signalCooldownMs: parseNumber(env['STRATEGY_SIGNAL_COOLDOWN_MS'], 30000),
     },
 
     anthropic: {

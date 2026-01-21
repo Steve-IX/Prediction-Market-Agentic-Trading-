@@ -357,11 +357,16 @@ export class TradingEngine extends EventEmitter {
     matchedPairs: number;
     websocketConnected: boolean;
     priceDataStatus: string;
+    websocketSubscriptions: { marketCount: number; sampleOutcomeIds: string[] };
   } {
     const polymarketMarkets = this.markets.get(PLATFORMS.POLYMARKET) ?? [];
     const kalshiMarkets = this.markets.get(PLATFORMS.KALSHI) ?? [];
     const trackedCount = this.strategyManager.getTrackedMarketsCount();
     const activeSignals = this.strategyManager.getAllActiveSignals().length;
+    
+    // Get tracked markets from MarketDataService to show subscriptions
+    const trackedMarkets = this.marketDataService.getTrackedMarkets();
+    const allOutcomeIds = trackedMarkets.flatMap(m => m.outcomeIds);
 
     return {
       marketsCount: {
@@ -376,6 +381,10 @@ export class TradingEngine extends EventEmitter {
       priceDataStatus: trackedCount > 0 
         ? `Tracking ${trackedCount} markets` 
         : 'No price data yet - waiting for WebSocket updates',
+      websocketSubscriptions: {
+        marketCount: trackedMarkets.length,
+        sampleOutcomeIds: allOutcomeIds.slice(0, 5), // Show first 5 outcome IDs
+      },
     };
   }
 

@@ -115,6 +115,21 @@ export class OrderManager extends EventEmitter {
       throw new Error('Kill switch is active - trading is disabled');
     }
 
+    // Check minimum trade size (platform-specific)
+    // Polymarket requires $1 minimum, Kalshi requires $5 minimum
+    const orderSizeUsd = Number(order.size);
+    const minTradeSize = order.platform === PLATFORMS.POLYMARKET ? 1.0 : order.platform === PLATFORMS.KALSHI ? 5.0 : 1.0;
+    
+    if (orderSizeUsd < minTradeSize) {
+      const errorMsg = `Order size $${orderSizeUsd.toFixed(2)} below minimum trade size of $${minTradeSize} for ${order.platform}`;
+      this.log.warn('Order rejected - below minimum trade size', {
+        orderSize: orderSizeUsd,
+        minTradeSize,
+        platform: order.platform,
+      });
+      throw new Error(errorMsg);
+    }
+
     // Risk checks
     const positionLimitCheck = this.positionLimits.checkOrder(order);
     if (!positionLimitCheck.allowed) {

@@ -4,6 +4,8 @@ import { PriceHistoryTracker, type PriceStats } from '../services/priceHistory/P
 import { MomentumStrategy, type TradingSignal } from './momentum/MomentumStrategy.js';
 import { MeanReversionStrategy } from './momentum/MeanReversionStrategy.js';
 import { OrderbookImbalanceStrategy } from './momentum/OrderbookImbalanceStrategy.js';
+import { ProbabilitySumStrategy } from './prediction/ProbabilitySumStrategy.js';
+import { EndgameStrategy } from './prediction/EndgameStrategy.js';
 import { logger, type Logger } from '../utils/logger.js';
 
 /**
@@ -13,6 +15,8 @@ export interface StrategyManagerConfig {
   enableMomentum: boolean;
   enableMeanReversion: boolean;
   enableOrderbookImbalance: boolean;
+  enableProbabilitySum: boolean; // Prediction market arbitrage (YES+NO != $1)
+  enableEndgame: boolean; // High probability near resolution
   maxConcurrentSignals: number;
   signalCooldownMs: number;
   // Strategy-specific configs from environment variables
@@ -33,12 +37,26 @@ export interface StrategyManagerConfig {
     maxPositionSize?: number;
     minPositionSize?: number;
   };
+  probabilitySumConfig?: {
+    minMispricingPercent?: number;
+    maxPositionSize?: number;
+    minPositionSize?: number;
+  };
+  endgameConfig?: {
+    minProbability?: number;
+    maxHoursToResolution?: number;
+    minAnnualizedReturn?: number;
+    maxPositionSize?: number;
+    minPositionSize?: number;
+  };
 }
 
 const DEFAULT_CONFIG: StrategyManagerConfig = {
   enableMomentum: true,
   enableMeanReversion: true,
   enableOrderbookImbalance: true,
+  enableProbabilitySum: true, // Enabled by default - most reliable strategy
+  enableEndgame: true, // Enabled by default
   maxConcurrentSignals: 3,
   signalCooldownMs: 30000, // 30 seconds between signals on same market
 };
@@ -54,10 +72,14 @@ export class StrategyManager extends EventEmitter {
   // Price tracking
   private priceTracker: PriceHistoryTracker;
 
-  // Strategies
+  // Technical Analysis Strategies (require price history)
   private momentumStrategy: MomentumStrategy;
   private meanReversionStrategy: MeanReversionStrategy;
   private orderbookImbalanceStrategy: OrderbookImbalanceStrategy;
+
+  // Prediction Market-Specific Strategies (don't need price history)
+  private probabilitySumStrategy: ProbabilitySumStrategy;
+  private endgameStrategy: EndgameStrategy;
 
   // Signal management
   private signalCooldowns: Map<string, Date> = new Map();
@@ -72,6 +94,10 @@ export class StrategyManager extends EventEmitter {
     this.momentumStrategy = new MomentumStrategy(this.config.momentumConfig);
     this.meanReversionStrategy = new MeanReversionStrategy(this.config.meanReversionConfig);
     this.orderbookImbalanceStrategy = new OrderbookImbalanceStrategy(this.config.orderbookImbalanceConfig);
+    
+    // Prediction market-specific strategies (don't need price history)
+    this.probabilitySumStrategy = new ProbabilitySumStrategy(this.config.probabilitySumConfig);
+    this.endgameStrategy = new EndgameStrategy(this.config.endgameConfig);
 
     // Forward signals from strategies
     this.setupEventForwarding();
@@ -101,6 +127,34 @@ export class StrategyManager extends EventEmitter {
       return signals;
     }
 
+    // === PREDICTION MARKET-SPECIFIC STRATEGIES (highest priority, don't need price history) ===
+    
+    // Run probability sum strategy (YES+NO != $1 arbitrage)
+    if (this.config.enableProbabilitySum) {
+      const signal = this.probabilitySumStrategy.analyze(market);
+      if (signal) {
+        signals.push(signal);
+        this.log.info('ProbabilitySum signal generated', {
+          market: market.title.substring(0, 40),
+          confidence: signal.confidence.toFixed(2),
+        });
+      }
+    }
+
+    // Run endgame strategy (high probability near resolution)
+    if (this.config.enableEndgame) {
+      const signal = this.endgameStrategy.analyze(market);
+      if (signal) {
+        signals.push(signal);
+        this.log.info('Endgame signal generated', {
+          market: market.title.substring(0, 40),
+          confidence: signal.confidence.toFixed(2),
+        });
+      }
+    }
+
+    // === TECHNICAL ANALYSIS STRATEGIES (need price history) ===
+    
     // Get price stats
     const stats = this.priceTracker.getStats(market.externalId, 60);
 
@@ -165,6 +219,8 @@ export class StrategyManager extends EventEmitter {
 
     // Get all active signals from strategies
     const allSignals = [
+      ...this.probabilitySumStrategy.getActiveSignals(),
+      ...this.endgameStrategy.getActiveSignals(),
       ...this.momentumStrategy.getActiveSignals(),
       ...this.meanReversionStrategy.getActiveSignals(),
       ...this.orderbookImbalanceStrategy.getActiveSignals(),
@@ -182,6 +238,8 @@ export class StrategyManager extends EventEmitter {
    * Mark a signal as executed (removes from active)
    */
   markSignalExecuted(signal: TradingSignal): void {
+    this.probabilitySumStrategy.clearSignal(signal.marketId);
+    this.endgameStrategy.clearSignal(signal.marketId);
     this.momentumStrategy.clearSignal(signal.marketId);
     this.meanReversionStrategy.clearSignal(signal.marketId);
     this.orderbookImbalanceStrategy.clearSignal(signal.marketId);
@@ -200,6 +258,8 @@ export class StrategyManager extends EventEmitter {
    */
   getAllActiveSignals(): TradingSignal[] {
     return [
+      ...this.probabilitySumStrategy.getActiveSignals(),
+      ...this.endgameStrategy.getActiveSignals(),
       ...this.momentumStrategy.getActiveSignals(),
       ...this.meanReversionStrategy.getActiveSignals(),
       ...this.orderbookImbalanceStrategy.getActiveSignals(),
@@ -233,6 +293,14 @@ export class StrategyManager extends EventEmitter {
     });
 
     // Forward strategy signals
+    this.probabilitySumStrategy.on('signal', (signal) => {
+      this.emit('signal', signal);
+    });
+
+    this.endgameStrategy.on('signal', (signal) => {
+      this.emit('signal', signal);
+    });
+
     this.momentumStrategy.on('signal', (signal) => {
       this.emit('signal', signal);
     });
@@ -271,6 +339,8 @@ export class StrategyManager extends EventEmitter {
   }
 
   private cleanExpiredSignals(): void {
+    this.probabilitySumStrategy.clearExpiredSignals();
+    this.endgameStrategy.clearExpiredSignals();
     this.momentumStrategy.clearExpiredSignals();
     this.meanReversionStrategy.clearExpiredSignals();
     this.orderbookImbalanceStrategy.clearExpiredSignals();

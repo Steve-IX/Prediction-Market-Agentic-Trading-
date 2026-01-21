@@ -73,10 +73,13 @@ const FeatureFlagsSchema = z.object({
   enableSinglePlatformArb: z.boolean().default(true),
   enableMarketMaking: z.boolean().default(false),
   enableWebSocket: z.boolean().default(true),
-  // New trading strategies
+  // Technical analysis strategies
   enableMomentumStrategy: z.boolean().default(true),
   enableMeanReversionStrategy: z.boolean().default(true),
   enableOrderbookImbalanceStrategy: z.boolean().default(true),
+  // Prediction market-specific strategies (don't need price history)
+  enableProbabilitySumStrategy: z.boolean().default(true),
+  enableEndgameStrategy: z.boolean().default(true),
 });
 
 // Strategy configuration schema
@@ -91,6 +94,14 @@ const StrategyConfigSchema = z.object({
   
   // Orderbook imbalance strategy
   orderbookImbalanceRatio: z.number().min(1).default(2),
+  
+  // Probability sum strategy (NEW)
+  probabilitySumMinMispricingPercent: z.number().min(0).default(0.5),
+  
+  // Endgame strategy (NEW)
+  endgameMinProbability: z.number().min(0).max(1).default(0.90),
+  endgameMaxHoursToResolution: z.number().positive().default(168), // 1 week
+  endgameMinAnnualizedReturn: z.number().positive().default(50), // 50%
   
   // Position sizing
   maxPositionSize: z.number().positive().default(100),

@@ -156,6 +156,8 @@ export class TradingEngine extends EventEmitter {
       enableMomentum: this.appConfig.features.enableMomentumStrategy,
       enableMeanReversion: this.appConfig.features.enableMeanReversionStrategy,
       enableOrderbookImbalance: this.appConfig.features.enableOrderbookImbalanceStrategy,
+      enableProbabilitySum: this.appConfig.features.enableProbabilitySumStrategy ?? true,
+      enableEndgame: this.appConfig.features.enableEndgameStrategy ?? true,
       signalCooldownMs: this.appConfig.strategies.signalCooldownMs,
       momentumConfig: {
         minMomentum: this.appConfig.strategies.momentumMinMomentum,
@@ -171,6 +173,18 @@ export class TradingEngine extends EventEmitter {
       },
       orderbookImbalanceConfig: {
         minImbalanceRatio: this.appConfig.strategies.orderbookImbalanceRatio,
+        maxPositionSize: this.appConfig.strategies.maxPositionSize,
+        minPositionSize: this.appConfig.strategies.minPositionSize,
+      },
+      probabilitySumConfig: {
+        minMispricingPercent: this.appConfig.strategies.probabilitySumMinMispricingPercent ?? 0.5,
+        maxPositionSize: this.appConfig.strategies.maxPositionSize,
+        minPositionSize: this.appConfig.strategies.minPositionSize,
+      },
+      endgameConfig: {
+        minProbability: this.appConfig.strategies.endgameMinProbability ?? 0.90,
+        maxHoursToResolution: this.appConfig.strategies.endgameMaxHoursToResolution ?? 168,
+        minAnnualizedReturn: this.appConfig.strategies.endgameMinAnnualizedReturn ?? 50,
         maxPositionSize: this.appConfig.strategies.maxPositionSize,
         minPositionSize: this.appConfig.strategies.minPositionSize,
       },
@@ -748,24 +762,34 @@ export class TradingEngine extends EventEmitter {
 
   private subscribeToTrackedMarkets(): void {
     // Subscribe to Polymarket markets
+    // Track all active markets (not just 20) - prediction strategies work on all markets
     const polymarketMarkets = this.markets.get(PLATFORMS.POLYMARKET) ?? [];
-    for (const market of polymarketMarkets.slice(0, 20)) {
-      // Limit to top 20 for now
+    const activePolymarketMarkets = polymarketMarkets.filter(m => m.isActive);
+    
+    // Track up to 200 markets for price history (technical strategies need this)
+    // But prediction strategies (ProbabilitySum, Endgame) work on ALL markets
+    const marketsToTrack = activePolymarketMarkets.slice(0, 200);
+    
+    for (const market of marketsToTrack) {
       const outcomeIds = market.outcomes.map((o) => o.externalId);
       this.marketDataService.trackMarket(PLATFORMS.POLYMARKET, market.externalId, outcomeIds);
     }
 
     // Subscribe to Kalshi markets
     const kalshiMarkets = this.markets.get(PLATFORMS.KALSHI) ?? [];
-    for (const market of kalshiMarkets.slice(0, 20)) {
-      // Limit to top 20 for now
+    const activeKalshiMarkets = kalshiMarkets.filter(m => m.isActive);
+    const kalshiMarketsToTrack = activeKalshiMarkets.slice(0, 200);
+    
+    for (const market of kalshiMarketsToTrack) {
       const outcomeIds = market.outcomes.map((o) => o.externalId);
       this.marketDataService.trackMarket(PLATFORMS.KALSHI, market.externalId, outcomeIds);
     }
 
     this.log.info('Subscribed to tracked markets', {
-      polymarket: Math.min(polymarketMarkets.length, 20),
-      kalshi: Math.min(kalshiMarkets.length, 20),
+      polymarket: marketsToTrack.length,
+      kalshi: kalshiMarketsToTrack.length,
+      totalActive: activePolymarketMarkets.length,
+      note: 'Prediction strategies analyze ALL active markets, not just tracked ones',
     });
   }
 }

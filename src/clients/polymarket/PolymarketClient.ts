@@ -103,6 +103,15 @@ export class PolymarketClient implements IPlatformClient {
 
         // Initialize trading client with provided credentials
         // Pass funder address for proxy wallet users (signature type GNOSIS)
+        this.log.info('Initializing ClobClient with funder address', {
+          host: this.config.host,
+          chainId: this.config.chainId,
+          signerAddress: this.signer.address,
+          signatureType,
+          funderAddress: this.config.funderAddress,
+          note: 'Funder address should be used for balance queries when signatureType is 2 (GNOSIS)',
+        });
+        
         this.client = new ClobClient(
           this.config.host, 
           this.config.chainId, 
@@ -677,9 +686,13 @@ export class PolymarketClient implements IPlatformClient {
         note: signatureType === 'GNOSIS' 
           ? 'Balance should be in funder address (proxy wallet), not EOA'
           : 'Balance is in EOA address',
+        important: signatureType === 'GNOSIS' && funderAddress !== 'not set'
+          ? 'Verify funder address matches your Polymarket profile wallet address (Settings → Wallet)'
+          : undefined,
       });
 
       // Must specify asset_type: COLLATERAL to get USDC balance
+      // For signature type 2 (GNOSIS), the SDK should use the funder address from constructor
       const balanceData = await this.client!.getBalanceAllowance({
         asset_type: AssetType.COLLATERAL,
       });
@@ -688,15 +701,66 @@ export class PolymarketClient implements IPlatformClient {
       observeApiLatency(this.platform, 'getBalance', durationMs);
       recordApiRequest(this.platform, 'getBalance', 'success');
 
+      // Log full response for debugging
+      this.log.debug('Raw balance response from SDK', {
+        fullResponse: JSON.stringify(balanceData),
+        balanceType: typeof balanceData.balance,
+        balanceValue: balanceData.balance,
+        allowanceType: typeof balanceData.allowance,
+        allowanceValue: balanceData.allowance,
+      });
+
       // Polymarket returns balance in USDC with 6 decimals
+      // The balance can be a string (in wei/6 decimals) or a number
       const balance = balanceData.balance;
-      const available = typeof balance === 'string' ? parseFloat(balance) / 1e6 : 0;
+      let available = 0;
+      
+      if (typeof balance === 'string') {
+        // String format: could be in wei (6 decimals) or already in USDC
+        const balanceNum = parseFloat(balance);
+        // If it's a very large number (> 1000), it's likely in wei format (6 decimals)
+        if (balanceNum > 1000) {
+          available = balanceNum / 1e6;
+        } else {
+          // Already in USDC format
+          available = balanceNum;
+        }
+      } else if (typeof balance === 'number') {
+        // Number format: could be in wei (6 decimals) or already in USDC
+        if (balance > 1000) {
+          available = balance / 1e6;
+        } else {
+          available = balance;
+        }
+      }
+
+      // Check if balance is 0 and we have a funder address configured
+      if (available === 0 && this.config.funderAddress && this.config.signatureType === 'GNOSIS') {
+        this.log.warn('Balance is 0 - possible issues:', {
+          funderAddress: this.config.funderAddress,
+          eoaAddress: this.signer?.address,
+          signatureType: this.config.signatureType,
+          rawBalance: balance,
+          suggestions: [
+            '1. Verify funder address matches your Polymarket profile wallet address',
+            '2. Check if funds are actually in the proxy wallet (not EOA)',
+            '3. Ensure API credentials were created for the correct wallet',
+            '4. Try checking balance on Polymarket website to confirm',
+          ],
+        });
+      }
 
       this.log.info('Balance fetched', {
         rawBalance: balance,
+        rawBalanceType: typeof balance,
         availableUsdc: available,
+        allowance: balanceData.allowance,
         funderAddress,
         eoaAddress,
+        signatureType,
+        note: available === 0 
+          ? 'If balance is 0 but funds exist on-chain, SDK may not be using funder address correctly'
+          : 'Balance retrieved successfully',
       });
 
       return {

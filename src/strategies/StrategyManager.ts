@@ -198,11 +198,27 @@ export class StrategyManager extends EventEmitter {
    */
   scanMarkets(markets: NormalizedMarket[], orderbooks?: Map<string, OrderBook>): TradingSignal[] {
     const allSignals: TradingSignal[] = [];
+    const activeMarkets = markets.filter(m => m.isActive);
 
-    for (const market of markets) {
-      const orderbook = orderbooks?.get(market.externalId);
+    this.log.debug('Scanning markets for signals', {
+      totalMarkets: markets.length,
+      activeMarkets: activeMarkets.length,
+      orderbooksAvailable: orderbooks?.size || 0,
+    });
+
+    for (const market of activeMarkets) {
+      // Try to get orderbook for first outcome (for orderbook imbalance strategy)
+      const firstOutcomeId = market.outcomes[0]?.externalId;
+      const orderbook = firstOutcomeId ? orderbooks?.get(firstOutcomeId) : undefined;
       const signals = this.analyzeMarket(market, orderbook);
       allSignals.push(...signals);
+    }
+    
+    if (allSignals.length > 0) {
+      this.log.info('Signals found during scan', {
+        signalCount: allSignals.length,
+        strategies: [...new Set(allSignals.map(s => s.strategy))],
+      });
     }
 
     // Sort by confidence and limit

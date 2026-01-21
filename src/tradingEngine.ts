@@ -532,6 +532,7 @@ export class TradingEngine extends EventEmitter {
       return;
     }
 
+    // Trigger scan (will log internally)
     await this.scanForOpportunities();
   }
 
@@ -567,7 +568,20 @@ export class TradingEngine extends EventEmitter {
 
       // NEW: Run active trading strategies
       const polymarketMarkets = this.markets.get(PLATFORMS.POLYMARKET) ?? [];
-      const tradingSignals = this.strategyManager.scanMarkets(polymarketMarkets, this.orderbooks);
+      const activeMarkets = polymarketMarkets.filter(m => m.isActive);
+      
+      this.log.debug('Scanning markets for trading signals', {
+        totalMarkets: polymarketMarkets.length,
+        activeMarkets: activeMarkets.length,
+        orderbooksCached: this.orderbooks.size,
+      });
+      
+      const tradingSignals = this.strategyManager.scanMarkets(activeMarkets, this.orderbooks);
+      
+      this.log.debug('Strategy scan completed', {
+        signalsFound: tradingSignals.length,
+        orderbooksUsed: this.orderbooks.size,
+      });
 
       // Execute trading signals (priority over arbitrage)
       if (tradingSignals.length > 0) {
@@ -604,10 +618,21 @@ export class TradingEngine extends EventEmitter {
         await this.executeBestOpportunity(opportunities);
       }
 
+      // Log scan summary periodically (every 10th scan or when opportunities found)
+      if (opportunities.length > 0 || tradingSignals.length > 0 || Math.random() < 0.1) {
+        this.log.info('Scan completed', {
+          arbitrageOpportunities: opportunities.length,
+          tradingSignals: tradingSignals.length,
+          marketsScanned: activeMarkets.length,
+          orderbooksAvailable: this.orderbooks.size,
+        });
+      }
+
       return opportunities;
     } catch (error) {
       this.log.error('Error during scan', {
         error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
       });
       return [];
     } finally {

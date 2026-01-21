@@ -231,6 +231,22 @@ async function main(): Promise<void> {
         kalshi.isConnected() ? kalshi.getBalance() : Promise.resolve({ available: 0, locked: 0, total: 0, currency: 'USD' }),
       ]);
 
+      // Log balance fetch results for debugging
+      if (polyBalance.status === 'rejected') {
+        log.error('Failed to fetch Polymarket balance', { 
+          error: polyBalance.reason,
+          funderAddress: config.polymarket.funderAddress,
+          signatureType: config.polymarket.signatureType,
+        });
+      } else if (polyBalance.value.total === 0 && config.polymarket.funderAddress) {
+        log.warn('Polymarket balance is 0 despite funder address configured', {
+          funderAddress: config.polymarket.funderAddress,
+          signatureType: config.polymarket.signatureType,
+          eoaAddress: config.polymarket.privateKey ? 'set' : 'not set',
+          note: 'Verify funder address matches your Polymarket proxy wallet address',
+        });
+      }
+
       res.json({
         polymarket: polyBalance.status === 'fulfilled' ? polyBalance.value : null,
         kalshi: kalshiBalance.status === 'fulfilled' ? kalshiBalance.value : null,

@@ -6,6 +6,7 @@ import { MeanReversionStrategy } from './momentum/MeanReversionStrategy.js';
 import { OrderbookImbalanceStrategy } from './momentum/OrderbookImbalanceStrategy.js';
 import { ProbabilitySumStrategy } from './prediction/ProbabilitySumStrategy.js';
 import { EndgameStrategy } from './prediction/EndgameStrategy.js';
+import { OUTCOMES } from '../config/constants.js';
 import { logger, type Logger } from '../utils/logger.js';
 
 /**
@@ -201,8 +202,8 @@ export class StrategyManager extends EventEmitter {
     const activeMarkets = markets.filter(m => m.isActive);
     const binaryMarkets = activeMarkets.filter(m => m.outcomes.length === 2);
     const marketsWithPrices = binaryMarkets.filter(m => {
-      const yes = m.outcomes.find(o => o.type === 'YES');
-      const no = m.outcomes.find(o => o.type === 'NO');
+      const yes = m.outcomes.find(o => o.type === OUTCOMES.YES);
+      const no = m.outcomes.find(o => o.type === OUTCOMES.NO);
       return yes?.bestAsk && no?.bestAsk && yes.bestAsk > 0 && no.bestAsk > 0;
     });
 
@@ -231,18 +232,20 @@ export class StrategyManager extends EventEmitter {
       // Log summary of why no signals found (every 10th scan to avoid spam)
       if (Math.random() < 0.1) {
         const sampleMarket = marketsWithPrices[0];
-        const yes = sampleMarket.outcomes.find(o => o.type === 'YES');
-        const no = sampleMarket.outcomes.find(o => o.type === 'NO');
-        const sum = (yes?.bestAsk || 0) + (no?.bestAsk || 0);
-        this.log.debug('No signals found - sample market analysis', {
-          marketsAnalyzed: activeMarkets.length,
-          binaryMarkets: binaryMarkets.length,
-          marketsWithPrices: marketsWithPrices.length,
-          sampleSum: sum.toFixed(4),
-          sampleYesAsk: yes?.bestAsk?.toFixed(4),
-          sampleNoAsk: no?.bestAsk?.toFixed(4),
-          note: 'Markets may not meet strategy thresholds (e.g., probability sum < 1.0)',
-        });
+        if (sampleMarket) {
+          const yes = sampleMarket.outcomes.find(o => o.type === OUTCOMES.YES);
+          const no = sampleMarket.outcomes.find(o => o.type === OUTCOMES.NO);
+          const sum = (yes?.bestAsk || 0) + (no?.bestAsk || 0);
+          this.log.debug('No signals found - sample market analysis', {
+            marketsAnalyzed: activeMarkets.length,
+            binaryMarkets: binaryMarkets.length,
+            marketsWithPrices: marketsWithPrices.length,
+            sampleSum: sum.toFixed(4),
+            sampleYesAsk: yes?.bestAsk?.toFixed(4),
+            sampleNoAsk: no?.bestAsk?.toFixed(4),
+            note: 'Markets may not meet strategy thresholds (e.g., probability sum < 1.0)',
+          });
+        }
       }
     }
 

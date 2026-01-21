@@ -1,12 +1,14 @@
 # Prediction Market Trading Bot
 
-Cross-platform prediction market arbitrage trading bot for Polymarket and Kalshi.
+Prediction market trading bot for Polymarket (required) with optional Kalshi support for cross-platform arbitrage.
 
 ## Features
 
-- **Cross-Platform Arbitrage**: Detect and execute arbitrage between Polymarket and Kalshi
+- **Polymarket Trading**: Full support for Polymarket prediction markets (required)
+- **Cross-Platform Arbitrage**: Optional - detect and execute arbitrage between Polymarket and Kalshi (requires Kalshi credentials)
+- **Spread Hunter Strategy**: Targets illiquid markets with wide spreads (>2%) where bots are less active
 - **Paper Trading**: Full simulation mode before live trading
-- **Market Matching**: LLM-based semantic matching using Claude API
+- **Market Matching**: LLM-based semantic matching using Claude API (for cross-platform)
 - **Risk Management**: Kill switch, position limits, drawdown monitoring
 - **Real-time Data**: WebSocket connections for live orderbook updates
 - **Prometheus Metrics**: Full monitoring and observability
@@ -18,8 +20,8 @@ Cross-platform prediction market arbitrage trading bot for Polymarket and Kalshi
 - Node.js 20+
 - pnpm
 - PostgreSQL database (Neon recommended, or local)
-- Polymarket wallet (Ethereum private key)
-- Kalshi API keys (optional for Kalshi trading)
+- Polymarket wallet (Ethereum private key) - **Required**
+- Kalshi API keys - **Optional** (only needed for cross-platform arbitrage)
 
 ### Installation
 
@@ -34,13 +36,11 @@ cp .env.example .env
 # See Kalshi setup instructions below
 ```
 
-### Kalshi API Setup
+### Kalshi API Setup (Optional)
 
-1. Create account at https://kalshi.com (or https://demo.kalshi.com for testing)
-2. Navigate to **Account & Security** > **API Keys**
-3. Click **Create Key** and download the `.key` file immediately
-4. Store the key file in `keys/kalshi-private.key`
-5. Set `KALSHI_API_KEY_ID` in `.env`
+**Note:** Kalshi is optional. The bot runs perfectly fine with just Polymarket. Only set up Kalshi if you want cross-platform arbitrage.
+
+See [KALSHI_SETUP.md](./KALSHI_SETUP.md) for detailed instructions.
 
 ### Database Setup
 

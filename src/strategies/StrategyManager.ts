@@ -4,6 +4,7 @@ import { PriceHistoryTracker, type PriceStats } from '../services/priceHistory/P
 import { MomentumStrategy, type TradingSignal } from './momentum/MomentumStrategy.js';
 import { MeanReversionStrategy } from './momentum/MeanReversionStrategy.js';
 import { OrderbookImbalanceStrategy } from './momentum/OrderbookImbalanceStrategy.js';
+import { SpreadHunterStrategy } from './momentum/SpreadHunterStrategy.js';
 import { ProbabilitySumStrategy } from './prediction/ProbabilitySumStrategy.js';
 import { EndgameStrategy } from './prediction/EndgameStrategy.js';
 import { OUTCOMES } from '../config/constants.js';
@@ -16,6 +17,7 @@ export interface StrategyManagerConfig {
   enableMomentum: boolean;
   enableMeanReversion: boolean;
   enableOrderbookImbalance: boolean;
+  enableSpreadHunter: boolean; // Targets illiquid markets with wide spreads
   enableProbabilitySum: boolean; // Prediction market arbitrage (YES+NO != $1)
   enableEndgame: boolean; // High probability near resolution
   maxConcurrentSignals: number;
@@ -38,6 +40,14 @@ export interface StrategyManagerConfig {
     maxPositionSize?: number;
     minPositionSize?: number;
   };
+  spreadHunterConfig?: {
+    minSpreadPercent?: number;
+    maxSpreadPercent?: number;
+    minBidSize?: number;
+    minAskSize?: number;
+    maxPositionSize?: number;
+    minPositionSize?: number;
+  };
   probabilitySumConfig?: {
     minMispricingPercent?: number;
     maxPositionSize?: number;
@@ -56,6 +66,7 @@ const DEFAULT_CONFIG: StrategyManagerConfig = {
   enableMomentum: true,
   enableMeanReversion: true,
   enableOrderbookImbalance: true,
+  enableSpreadHunter: true, // Enabled by default - targets illiquid markets
   enableProbabilitySum: true, // Enabled by default - most reliable strategy
   enableEndgame: true, // Enabled by default
   maxConcurrentSignals: 3,
@@ -77,6 +88,7 @@ export class StrategyManager extends EventEmitter {
   private momentumStrategy: MomentumStrategy;
   private meanReversionStrategy: MeanReversionStrategy;
   private orderbookImbalanceStrategy: OrderbookImbalanceStrategy;
+  private spreadHunterStrategy: SpreadHunterStrategy;
 
   // Prediction Market-Specific Strategies (don't need price history)
   private probabilitySumStrategy: ProbabilitySumStrategy;
@@ -95,6 +107,7 @@ export class StrategyManager extends EventEmitter {
     this.momentumStrategy = new MomentumStrategy(this.config.momentumConfig);
     this.meanReversionStrategy = new MeanReversionStrategy(this.config.meanReversionConfig);
     this.orderbookImbalanceStrategy = new OrderbookImbalanceStrategy(this.config.orderbookImbalanceConfig);
+    this.spreadHunterStrategy = new SpreadHunterStrategy(this.config.spreadHunterConfig);
     
     // Prediction market-specific strategies (don't need price history)
     this.probabilitySumStrategy = new ProbabilitySumStrategy(this.config.probabilitySumConfig);
@@ -180,6 +193,19 @@ export class StrategyManager extends EventEmitter {
       const signal = this.orderbookImbalanceStrategy.analyze(market, orderbook);
       if (signal) {
         signals.push(signal);
+      }
+    }
+
+    // Run spread hunter strategy (targets illiquid markets with wide spreads)
+    if (this.config.enableSpreadHunter && orderbook) {
+      const signal = this.spreadHunterStrategy.analyze(market, orderbook);
+      if (signal) {
+        signals.push(signal);
+        this.log.info('SpreadHunter signal generated', {
+          market: market.title.substring(0, 40),
+          confidence: signal.confidence.toFixed(2),
+          reason: signal.reason,
+        });
       }
     }
 

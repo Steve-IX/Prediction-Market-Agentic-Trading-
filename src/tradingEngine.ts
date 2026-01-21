@@ -156,6 +156,7 @@ export class TradingEngine extends EventEmitter {
       enableMomentum: this.appConfig.features.enableMomentumStrategy,
       enableMeanReversion: this.appConfig.features.enableMeanReversionStrategy,
       enableOrderbookImbalance: this.appConfig.features.enableOrderbookImbalanceStrategy,
+      enableSpreadHunter: this.appConfig.features.enableSpreadHunterStrategy ?? true,
       enableProbabilitySum: this.appConfig.features.enableProbabilitySumStrategy ?? true,
       enableEndgame: this.appConfig.features.enableEndgameStrategy ?? true,
       signalCooldownMs: this.appConfig.strategies.signalCooldownMs,
@@ -173,6 +174,14 @@ export class TradingEngine extends EventEmitter {
       },
       orderbookImbalanceConfig: {
         minImbalanceRatio: this.appConfig.strategies.orderbookImbalanceRatio,
+        maxPositionSize: this.appConfig.strategies.maxPositionSize,
+        minPositionSize: this.appConfig.strategies.minPositionSize,
+      },
+      spreadHunterConfig: {
+        minSpreadPercent: this.appConfig.strategies.spreadHunterMinSpreadPercent ?? 2.0,
+        maxSpreadPercent: this.appConfig.strategies.spreadHunterMaxSpreadPercent ?? 15.0,
+        minBidSize: this.appConfig.strategies.spreadHunterMinBidSize ?? 10,
+        minAskSize: this.appConfig.strategies.spreadHunterMinAskSize ?? 10,
         maxPositionSize: this.appConfig.strategies.maxPositionSize,
         minPositionSize: this.appConfig.strategies.minPositionSize,
       },

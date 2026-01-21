@@ -107,6 +107,7 @@ function buildConfigFromEnv(): unknown {
       enableMomentumStrategy: parseBoolean(env['ENABLE_MOMENTUM_STRATEGY'], true),
       enableMeanReversionStrategy: parseBoolean(env['ENABLE_MEAN_REVERSION_STRATEGY'], true),
       enableOrderbookImbalanceStrategy: parseBoolean(env['ENABLE_ORDERBOOK_IMBALANCE_STRATEGY'], true),
+      enableSpreadHunterStrategy: parseBoolean(env['ENABLE_SPREAD_HUNTER_STRATEGY'], true),
       // Prediction market-specific strategies (don't need price history)
       enableProbabilitySumStrategy: parseBoolean(env['ENABLE_PROBABILITY_SUM_STRATEGY'], true),
       enableEndgameStrategy: parseBoolean(env['ENABLE_ENDGAME_STRATEGY'], true),
@@ -118,6 +119,11 @@ function buildConfigFromEnv(): unknown {
       meanReversionMinDeviation: parseNumber(env['MEAN_REVERSION_MIN_DEVIATION'], 3),
       meanReversionMaxDeviation: parseNumber(env['MEAN_REVERSION_MAX_DEVIATION'], 15),
       orderbookImbalanceRatio: parseNumber(env['ORDERBOOK_IMBALANCE_RATIO'], 2),
+      // Spread hunter strategy
+      spreadHunterMinSpreadPercent: parseNumber(env['SPREAD_HUNTER_MIN_SPREAD_PERCENT'], 2.0),
+      spreadHunterMaxSpreadPercent: parseNumber(env['SPREAD_HUNTER_MAX_SPREAD_PERCENT'], 15.0),
+      spreadHunterMinBidSize: parseNumber(env['SPREAD_HUNTER_MIN_BID_SIZE'], 10),
+      spreadHunterMinAskSize: parseNumber(env['SPREAD_HUNTER_MIN_ASK_SIZE'], 10),
       // Prediction market-specific strategies
       probabilitySumMinMispricingPercent: parseNumber(env['PROBABILITY_SUM_MIN_MISPRICING'], 0.5),
       endgameMinProbability: parseNumber(env['ENDGAME_MIN_PROBABILITY'], 0.90),

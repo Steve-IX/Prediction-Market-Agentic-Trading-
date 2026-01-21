@@ -77,6 +77,7 @@ const FeatureFlagsSchema = z.object({
   enableMomentumStrategy: z.boolean().default(true),
   enableMeanReversionStrategy: z.boolean().default(true),
   enableOrderbookImbalanceStrategy: z.boolean().default(true),
+  enableSpreadHunterStrategy: z.boolean().default(true), // Targets illiquid markets with wide spreads
   // Prediction market-specific strategies (don't need price history)
   enableProbabilitySumStrategy: z.boolean().default(true),
   enableEndgameStrategy: z.boolean().default(true),
@@ -94,6 +95,12 @@ const StrategyConfigSchema = z.object({
   
   // Orderbook imbalance strategy
   orderbookImbalanceRatio: z.number().min(1).default(2),
+  
+  // Spread hunter strategy (targets illiquid markets)
+  spreadHunterMinSpreadPercent: z.number().min(0).default(2.0),
+  spreadHunterMaxSpreadPercent: z.number().min(0).default(15.0),
+  spreadHunterMinBidSize: z.number().min(0).default(10),
+  spreadHunterMinAskSize: z.number().min(0).default(10),
   
   // Probability sum strategy (NEW)
   probabilitySumMinMispricingPercent: z.number().min(0).default(0.5),

@@ -665,6 +665,20 @@ export class PolymarketClient implements IPlatformClient {
     const timer = startTimer();
 
     try {
+      // Log which addresses are being used for balance check
+      const eoaAddress = this.signer?.address || 'unknown';
+      const funderAddress = this.config.funderAddress || 'not set';
+      const signatureType = this.config.signatureType || 'GNOSIS';
+      
+      this.log.info('Fetching balance', {
+        eoaAddress,
+        funderAddress,
+        signatureType,
+        note: signatureType === 'GNOSIS' 
+          ? 'Balance should be in funder address (proxy wallet), not EOA'
+          : 'Balance is in EOA address',
+      });
+
       // Must specify asset_type: COLLATERAL to get USDC balance
       const balanceData = await this.client!.getBalanceAllowance({
         asset_type: AssetType.COLLATERAL,
@@ -678,6 +692,13 @@ export class PolymarketClient implements IPlatformClient {
       const balance = balanceData.balance;
       const available = typeof balance === 'string' ? parseFloat(balance) / 1e6 : 0;
 
+      this.log.info('Balance fetched', {
+        rawBalance: balance,
+        availableUsdc: available,
+        funderAddress,
+        eoaAddress,
+      });
+
       return {
         available,
         locked: 0,
@@ -689,7 +710,12 @@ export class PolymarketClient implements IPlatformClient {
       observeApiLatency(this.platform, 'getBalance', durationMs);
       recordApiRequest(this.platform, 'getBalance', 'error');
 
-      this.log.error('Failed to get balance', { error });
+      this.log.error('Failed to get balance', { 
+        error,
+        eoaAddress: this.signer?.address,
+        funderAddress: this.config.funderAddress,
+        signatureType: this.config.signatureType,
+      });
       throw error;
     }
   }

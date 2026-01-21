@@ -108,6 +108,18 @@ export class ProbabilitySumStrategy extends EventEmitter {
     // Calculate profit after fees
     const profitAfterFees = (1.0 - sumOfAsks) * 100 - this.config.platformFeePercent;
 
+    // Log if we find a close opportunity (within 2% of threshold) for diagnostics
+    if (sumOfAsks < 1.02 && sumOfAsks >= 1.0) {
+      this.log.debug('Close probability sum opportunity', {
+        market: market.title.substring(0, 40),
+        sumOfAsks: sumOfAsks.toFixed(4),
+        yesAsk: yesAsk.toFixed(4),
+        noAsk: noAsk.toFixed(4),
+        profitAfterFees: profitAfterFees.toFixed(2),
+        threshold: '1.0',
+      });
+    }
+
     // Check for arbitrage opportunity: sum < $1.00 (minus fees)
     if (sumOfAsks < 1.0 && profitAfterFees > 0) {
       // We can buy both YES and NO for less than $1, guaranteed $1 at resolution

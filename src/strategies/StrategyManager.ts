@@ -199,10 +199,18 @@ export class StrategyManager extends EventEmitter {
   scanMarkets(markets: NormalizedMarket[], orderbooks?: Map<string, OrderBook>): TradingSignal[] {
     const allSignals: TradingSignal[] = [];
     const activeMarkets = markets.filter(m => m.isActive);
+    const binaryMarkets = activeMarkets.filter(m => m.outcomes.length === 2);
+    const marketsWithPrices = binaryMarkets.filter(m => {
+      const yes = m.outcomes.find(o => o.type === 'YES');
+      const no = m.outcomes.find(o => o.type === 'NO');
+      return yes?.bestAsk && no?.bestAsk && yes.bestAsk > 0 && no.bestAsk > 0;
+    });
 
     this.log.debug('Scanning markets for signals', {
       totalMarkets: markets.length,
       activeMarkets: activeMarkets.length,
+      binaryMarkets: binaryMarkets.length,
+      marketsWithPrices: marketsWithPrices.length,
       orderbooksAvailable: orderbooks?.size || 0,
     });
 
@@ -219,6 +227,23 @@ export class StrategyManager extends EventEmitter {
         signalCount: allSignals.length,
         strategies: [...new Set(allSignals.map(s => s.strategy))],
       });
+    } else if (marketsWithPrices.length > 0) {
+      // Log summary of why no signals found (every 10th scan to avoid spam)
+      if (Math.random() < 0.1) {
+        const sampleMarket = marketsWithPrices[0];
+        const yes = sampleMarket.outcomes.find(o => o.type === 'YES');
+        const no = sampleMarket.outcomes.find(o => o.type === 'NO');
+        const sum = (yes?.bestAsk || 0) + (no?.bestAsk || 0);
+        this.log.debug('No signals found - sample market analysis', {
+          marketsAnalyzed: activeMarkets.length,
+          binaryMarkets: binaryMarkets.length,
+          marketsWithPrices: marketsWithPrices.length,
+          sampleSum: sum.toFixed(4),
+          sampleYesAsk: yes?.bestAsk?.toFixed(4),
+          sampleNoAsk: no?.bestAsk?.toFixed(4),
+          note: 'Markets may not meet strategy thresholds (e.g., probability sum < 1.0)',
+        });
+      }
     }
 
     // Sort by confidence and limit

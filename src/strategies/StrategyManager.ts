@@ -15,6 +15,24 @@ export interface StrategyManagerConfig {
   enableOrderbookImbalance: boolean;
   maxConcurrentSignals: number;
   signalCooldownMs: number;
+  // Strategy-specific configs from environment variables
+  momentumConfig?: {
+    minMomentum?: number;
+    minChangePercent?: number;
+    maxPositionSize?: number;
+    minPositionSize?: number;
+  };
+  meanReversionConfig?: {
+    minDeviation?: number;
+    maxDeviation?: number;
+    maxPositionSize?: number;
+    minPositionSize?: number;
+  };
+  orderbookImbalanceConfig?: {
+    minImbalanceRatio?: number;
+    maxPositionSize?: number;
+    minPositionSize?: number;
+  };
 }
 
 const DEFAULT_CONFIG: StrategyManagerConfig = {
@@ -51,9 +69,9 @@ export class StrategyManager extends EventEmitter {
 
     // Initialize components
     this.priceTracker = new PriceHistoryTracker(1000, 1000);
-    this.momentumStrategy = new MomentumStrategy();
-    this.meanReversionStrategy = new MeanReversionStrategy();
-    this.orderbookImbalanceStrategy = new OrderbookImbalanceStrategy();
+    this.momentumStrategy = new MomentumStrategy(this.config.momentumConfig);
+    this.meanReversionStrategy = new MeanReversionStrategy(this.config.meanReversionConfig);
+    this.orderbookImbalanceStrategy = new OrderbookImbalanceStrategy(this.config.orderbookImbalanceConfig);
 
     // Forward signals from strategies
     this.setupEventForwarding();

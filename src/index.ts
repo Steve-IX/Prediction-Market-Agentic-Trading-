@@ -341,6 +341,47 @@ async function main(): Promise<void> {
     }
   });
 
+  // Diagnostics endpoint - shows internal state for debugging
+  app.get('/api/trading/diagnostics', async (_req, res) => {
+    if (!tradingEngine) {
+      return res.status(404).json({ error: 'Trading engine not initialized' });
+    }
+
+    try {
+      const diagnostics = tradingEngine.getDiagnostics();
+      const state = tradingEngine.getState();
+      
+      res.json({
+        ...diagnostics,
+        engineState: {
+          isRunning: state.isRunning,
+          isInitialized: state.isInitialized,
+          lastScanTime: state.lastScanTime,
+          opportunitiesDetected: state.opportunitiesDetected,
+        },
+        troubleshooting: {
+          issue: diagnostics.trackedMarketsForStrategies === 0 
+            ? 'No price data collected yet'
+            : diagnostics.orderbooksCached === 0 
+              ? 'No orderbook data cached'
+              : 'System appears healthy',
+          recommendation: diagnostics.trackedMarketsForStrategies === 0
+            ? 'Wait 1-2 minutes for WebSocket data to accumulate'
+            : diagnostics.orderbooksCached === 0
+              ? 'WebSocket may not be receiving orderbook updates'
+              : 'System should detect opportunities when market conditions align',
+        },
+      });
+      return;
+    } catch (error) {
+      res.status(500).json({
+        error: 'Failed to get diagnostics',
+        message: error instanceof Error ? error.message : String(error),
+      });
+      return;
+    }
+  });
+
   // Kill switch endpoint
   app.post('/api/kill-switch', async (_req, res) => {
     log.warn('Kill switch triggered via API');

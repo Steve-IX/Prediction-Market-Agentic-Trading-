@@ -110,10 +110,12 @@ export class PriceHistoryTracker extends EventEmitter {
 
   /**
    * Get price statistics for a market
+   * Requires minimum 3 data points to calculate basic stats
    */
   getStats(marketId: string, windowMinutes = 60): PriceStats | null {
     const points = this.history.get(marketId);
-    if (!points || points.length < 5) return null;
+    // Reduced from 5 to 3 for faster signal generation
+    if (!points || points.length < 3) return null;
 
     const now = new Date();
     const windowStart = new Date(now.getTime() - windowMinutes * 60 * 1000);

@@ -151,12 +151,29 @@ export class TradingEngine extends EventEmitter {
     this.arbitrageDetector = new ArbitrageDetector();
     this.arbitrageExecutor = new ArbitrageExecutor(this.orderManager);
     
-    // Create new strategy components
+    // Create new strategy components with config from environment variables
     this.strategyManager = new StrategyManager({
       enableMomentum: this.appConfig.features.enableMomentumStrategy,
       enableMeanReversion: this.appConfig.features.enableMeanReversionStrategy,
       enableOrderbookImbalance: this.appConfig.features.enableOrderbookImbalanceStrategy,
       signalCooldownMs: this.appConfig.strategies.signalCooldownMs,
+      momentumConfig: {
+        minMomentum: this.appConfig.strategies.momentumMinMomentum,
+        minChangePercent: this.appConfig.strategies.momentumMinChangePercent,
+        maxPositionSize: this.appConfig.strategies.maxPositionSize,
+        minPositionSize: this.appConfig.strategies.minPositionSize,
+      },
+      meanReversionConfig: {
+        minDeviation: this.appConfig.strategies.meanReversionMinDeviation,
+        maxDeviation: this.appConfig.strategies.meanReversionMaxDeviation,
+        maxPositionSize: this.appConfig.strategies.maxPositionSize,
+        minPositionSize: this.appConfig.strategies.minPositionSize,
+      },
+      orderbookImbalanceConfig: {
+        minImbalanceRatio: this.appConfig.strategies.orderbookImbalanceRatio,
+        maxPositionSize: this.appConfig.strategies.maxPositionSize,
+        minPositionSize: this.appConfig.strategies.minPositionSize,
+      },
     });
     this.signalExecutor = new SignalExecutor(this.orderManager);
 
@@ -327,6 +344,39 @@ export class TradingEngine extends EventEmitter {
    */
   getMarkets(): Map<Platform, NormalizedMarket[]> {
     return new Map(this.markets);
+  }
+
+  /**
+   * Get diagnostic information for debugging
+   */
+  getDiagnostics(): {
+    marketsCount: { polymarket: number; kalshi: number };
+    trackedMarketsForStrategies: number;
+    orderbooksCached: number;
+    activeSignals: number;
+    matchedPairs: number;
+    websocketConnected: boolean;
+    priceDataStatus: string;
+  } {
+    const polymarketMarkets = this.markets.get(PLATFORMS.POLYMARKET) ?? [];
+    const kalshiMarkets = this.markets.get(PLATFORMS.KALSHI) ?? [];
+    const trackedCount = this.strategyManager.getTrackedMarketsCount();
+    const activeSignals = this.strategyManager.getAllActiveSignals().length;
+
+    return {
+      marketsCount: {
+        polymarket: polymarketMarkets.length,
+        kalshi: kalshiMarkets.length,
+      },
+      trackedMarketsForStrategies: trackedCount,
+      orderbooksCached: this.orderbooks.size,
+      activeSignals,
+      matchedPairs: this.matchedPairs.length,
+      websocketConnected: this.marketDataService.isConnected(),
+      priceDataStatus: trackedCount > 0 
+        ? `Tracking ${trackedCount} markets` 
+        : 'No price data yet - waiting for WebSocket updates',
+    };
   }
 
   /**

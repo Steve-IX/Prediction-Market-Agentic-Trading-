@@ -207,13 +207,16 @@ export class StrategyManager extends EventEmitter {
       return yes?.bestAsk && no?.bestAsk && yes.bestAsk > 0 && no.bestAsk > 0;
     });
 
-    this.log.debug('Scanning markets for signals', {
-      totalMarkets: markets.length,
-      activeMarkets: activeMarkets.length,
-      binaryMarkets: binaryMarkets.length,
-      marketsWithPrices: marketsWithPrices.length,
-      orderbooksAvailable: orderbooks?.size || 0,
-    });
+    // Log at info level periodically (every 5th scan) to avoid spam
+    if (Math.random() < 0.2) {
+      this.log.info('Scanning markets for signals', {
+        totalMarkets: markets.length,
+        activeMarkets: activeMarkets.length,
+        binaryMarkets: binaryMarkets.length,
+        marketsWithPrices: marketsWithPrices.length,
+        orderbooksAvailable: orderbooks?.size || 0,
+      });
+    }
 
     for (const market of activeMarkets) {
       // Try to get orderbook for first outcome (for orderbook imbalance strategy)
@@ -229,14 +232,14 @@ export class StrategyManager extends EventEmitter {
         strategies: [...new Set(allSignals.map(s => s.strategy))],
       });
     } else if (marketsWithPrices.length > 0) {
-      // Log summary of why no signals found (every 10th scan to avoid spam)
-      if (Math.random() < 0.1) {
+      // Log summary of why no signals found (every 5th scan to avoid spam)
+      if (Math.random() < 0.2) {
         const sampleMarket = marketsWithPrices[0];
         if (sampleMarket) {
           const yes = sampleMarket.outcomes.find(o => o.type === OUTCOMES.YES);
           const no = sampleMarket.outcomes.find(o => o.type === OUTCOMES.NO);
           const sum = (yes?.bestAsk || 0) + (no?.bestAsk || 0);
-          this.log.debug('No signals found - sample market analysis', {
+          this.log.info('No signals found - sample market analysis', {
             marketsAnalyzed: activeMarkets.length,
             binaryMarkets: binaryMarkets.length,
             marketsWithPrices: marketsWithPrices.length,

@@ -190,7 +190,14 @@ export class PolymarketWebSocket extends EventEmitter implements IWebSocketClien
       }
 
       this.sendMessage(message);
-      this.log.debug('Subscribed to channel', { channel, assetIds });
+      // Log at info level so we can see subscriptions in production logs
+      this.log.info('Sent subscription', { 
+        channel, 
+        assetIdCount: assetIds?.length ?? 0,
+        firstAssetId: assetIds?.[0]?.substring(0, 20) + '...',
+      });
+    } else {
+      this.log.warn('Cannot subscribe - not connected', { channel, state: this._state });
     }
   }
 
@@ -262,8 +269,8 @@ export class PolymarketWebSocket extends EventEmitter implements IWebSocketClien
   private handleMessage(data: string): void {
     // Handle non-JSON server responses (like "INVALID OPERATION")
     if (!data.startsWith('[') && !data.startsWith('{')) {
-      // Log at debug level since these are common for invalid subscriptions
-      this.log.debug('Received non-JSON message from server', { message: data.substring(0, 100) });
+      // Log at info level to help debug connection issues
+      this.log.info('Received non-JSON message from server', { message: data.substring(0, 100) });
       return;
     }
 
@@ -273,6 +280,15 @@ export class PolymarketWebSocket extends EventEmitter implements IWebSocketClien
 
       // Handle array of messages
       const messageArray = Array.isArray(messages) ? messages : [messages];
+
+      // Log first few messages for debugging
+      if (messageArray.length > 0) {
+        this.log.debug('Processing WebSocket messages', { 
+          count: messageArray.length,
+          firstMessageType: messageArray[0]?.event_type || messageArray[0]?.type || 'unknown',
+          hasAssetId: !!messageArray[0]?.asset_id,
+        });
+      }
 
       for (const message of messageArray) {
         this.processMessage(message as PolymarketWsMessage);
@@ -286,7 +302,10 @@ export class PolymarketWebSocket extends EventEmitter implements IWebSocketClien
   }
 
   private processMessage(message: PolymarketWsMessage): void {
-    switch (message.event_type) {
+    // Log event type for debugging (first 50 messages per session)
+    const eventType = message.event_type;
+    
+    switch (eventType) {
       case 'book':
         this.handleOrderBookUpdate(message as PolymarketOrderBookWsMessage);
         break;
@@ -298,7 +317,11 @@ export class PolymarketWebSocket extends EventEmitter implements IWebSocketClien
         this.emit('priceChange', message);
         break;
       default:
-        this.log.debug('Unknown message type', { type: message.event_type });
+        // Log unknown types at info level to help debug
+        this.log.info('Unknown/unhandled message type', { 
+          eventType,
+          messageKeys: Object.keys(message).slice(0, 5),
+        });
     }
   }
 

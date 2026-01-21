@@ -454,6 +454,16 @@ export class TradingEngine extends EventEmitter {
   }
 
   private async onPriceUpdate(update: PriceUpdate): Promise<void> {
+    // Log first price update for debugging
+    const trackedCount = this.strategyManager.getTrackedMarketsCount();
+    if (trackedCount === 0) {
+      this.log.info('First price update received by TradingEngine', {
+        marketId: update.marketId?.substring(0, 20),
+        bestBid: update.bestBid,
+        bestAsk: update.bestAsk,
+      });
+    }
+    
     // Track price history for strategies
     if (update.bestBid !== undefined && update.bestAsk !== undefined) {
       const midPrice = (update.bestBid + update.bestAsk) / 2;

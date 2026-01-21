@@ -337,6 +337,16 @@ export class MarketDataService extends EventEmitter {
   private onOrderBookUpdate(platform: Platform, update: OrderBookUpdate): void {
     const cacheKey = this.getCacheKey(platform, update.marketId, update.outcomeId);
     const now = new Date();
+    
+    // Log first orderbook update for debugging
+    if (this.orderBooks.size === 0) {
+      this.log.info('First orderbook update received', {
+        platform,
+        marketId: update.marketId?.substring(0, 20),
+        bidCount: update.bids?.length,
+        askCount: update.asks?.length,
+      });
+    }
 
     // Build OrderBook from update
     const orderBook: OrderBook = {

@@ -46,11 +46,14 @@ function buildConfigFromEnv(): unknown {
       apiKey: env['POLYMARKET_API_KEY'],
       apiSecret: env['POLYMARKET_API_SECRET'],
       apiPassphrase: env['POLYMARKET_API_PASSPHRASE'],
+      // Funder address - the proxy wallet where your USDC is held (from Polymarket settings)
+      funderAddress: env['POLYMARKET_FUNDER_ADDRESS'],
       chainId: parseNumber(env['POLYMARKET_CHAIN_ID'], 137),
       host: env['POLYMARKET_HOST'] || POLYMARKET_ENDPOINTS.CLOB,
       gammaHost: env['POLYMARKET_GAMMA_HOST'] || POLYMARKET_ENDPOINTS.GAMMA,
       wsHost: env['POLYMARKET_WS_HOST'] || POLYMARKET_ENDPOINTS.WS,
-      signatureType: env['POLYMARKET_SIGNATURE_TYPE'] || 'EOA',
+      // Default to GNOSIS for browser wallet users with proxy wallets
+      signatureType: env['POLYMARKET_SIGNATURE_TYPE'] || 'GNOSIS',
     },
 
     kalshi: {

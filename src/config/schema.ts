@@ -7,11 +7,16 @@ const PolymarketConfigSchema = z.object({
   apiKey: z.string().optional(),
   apiSecret: z.string().optional(),
   apiPassphrase: z.string().optional(),
+  // Funder address - the proxy wallet where your USDC is held
+  // This is the address shown in your Polymarket profile, NOT your EOA
+  // Required for signature type GNOSIS (2) to correctly fetch balances
+  funderAddress: z.string().optional(),
   chainId: z.number().default(137),
   host: z.string().default('https://clob.polymarket.com'),
   gammaHost: z.string().default('https://gamma-api.polymarket.com'),
   wsHost: z.string().default('wss://ws-subscriptions-clob.polymarket.com'),
-  signatureType: z.enum(['EOA', 'PROXY', 'GNOSIS']).default('EOA'),
+  // Default to GNOSIS (type 2) since most users have proxy wallets from browser login
+  signatureType: z.enum(['EOA', 'PROXY', 'GNOSIS']).default('GNOSIS'),
 });
 
 // Kalshi configuration schema

@@ -67,6 +67,20 @@ export class PolymarketClient implements IPlatformClient {
 
       // Map signature type
       const signatureType = this.mapSignatureType(this.config.signatureType);
+      
+      // Log funder address configuration
+      if (this.config.funderAddress) {
+        this.log.info('Funder address configured', { 
+          funderAddress: this.config.funderAddress,
+          signatureType: this.config.signatureType,
+        });
+      } else if (this.config.signatureType === 'GNOSIS') {
+        this.log.warn('No funder address configured for GNOSIS signature type', {
+          signatureType: this.config.signatureType,
+          suggestion: 'Set POLYMARKET_FUNDER_ADDRESS to your proxy wallet address from Polymarket settings for correct balance reporting',
+          walletAddress: this.signer.address,
+        });
+      }
 
       // Check if L2 API credentials are provided directly
       let shouldAutoDerive = false;
@@ -88,7 +102,15 @@ export class PolymarketClient implements IPlatformClient {
         };
 
         // Initialize trading client with provided credentials
-        this.client = new ClobClient(this.config.host, this.config.chainId, this.signer, apiCreds, signatureType);
+        // Pass funder address for proxy wallet users (signature type GNOSIS)
+        this.client = new ClobClient(
+          this.config.host, 
+          this.config.chainId, 
+          this.signer, 
+          apiCreds, 
+          signatureType,
+          this.config.funderAddress  // Proxy wallet address where USDC is held
+        );
 
         // Verify the credentials work by making a test request
         // Note: The SDK may log errors to console but not always throw exceptions
@@ -201,7 +223,15 @@ export class PolymarketClient implements IPlatformClient {
       this.log.debug('Note: SDK may log 400 error during createOrDeriveApiKey - this is expected behavior');
       
       // Create temporary client to derive API credentials
-      const tempClient = new ClobClient(this.config.host, this.config.chainId, this.signer);
+      // Pass funder address if available for proxy wallet support
+      const tempClient = new ClobClient(
+        this.config.host, 
+        this.config.chainId, 
+        this.signer,
+        undefined,  // No API creds yet - we're deriving them
+        signatureType,
+        this.config.funderAddress
+      );
 
       // Derive or create API credentials
       let apiCreds;
@@ -248,7 +278,15 @@ export class PolymarketClient implements IPlatformClient {
       });
 
       // Initialize trading client with credentials
-      this.client = new ClobClient(this.config.host, this.config.chainId, this.signer, apiCreds, signatureType);
+      // Pass funder address for proxy wallet users (signature type GNOSIS)
+      this.client = new ClobClient(
+        this.config.host, 
+        this.config.chainId, 
+        this.signer, 
+        apiCreds, 
+        signatureType,
+        this.config.funderAddress  // Proxy wallet address where USDC is held
+      );
 
       // Verify the derived credentials actually work
       try {

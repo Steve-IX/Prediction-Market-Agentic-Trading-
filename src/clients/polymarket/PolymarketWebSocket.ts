@@ -14,22 +14,22 @@ import { logger, type Logger } from '../../utils/logger.js';
 import { wsConnections, wsMessages, wsReconnections } from '../../utils/metrics.js';
 
 /**
- * WebSocket subscription request
+ * WebSocket subscription request - Polymarket market channel format
+ * Initial subscription uses type: 'market'
+ * Adding assets uses operation: 'subscribe'
  */
 interface SubscribeMessage {
-  type: 'subscribe';
-  channel: 'book' | 'price_change' | 'last_trade_price' | 'user';
-  assets_ids?: string[];
-  market?: string;
+  type?: 'market';
+  assets_ids: string[];
+  operation?: 'subscribe';
 }
 
 /**
  * WebSocket unsubscribe request
  */
 interface UnsubscribeMessage {
-  type: 'unsubscribe';
-  channel: string;
-  assets_ids?: string[];
+  assets_ids: string[];
+  operation: 'unsubscribe';
 }
 
 /**
@@ -163,40 +163,57 @@ export class PolymarketWebSocket extends EventEmitter implements IWebSocketClien
     this.log.info('Disconnected from WebSocket');
   }
 
+  // Track if we've sent initial subscription
+  private hasInitialSubscription = false;
+  // Collect all asset IDs we're tracking
+  private allAssetIds: Set<string> = new Set();
+
   /**
    * Subscribe to a channel
+   * Polymarket WebSocket uses a unified market channel - all assets get all events (book, trades, etc.)
    */
   subscribe(channel: string, params?: Record<string, unknown>): void {
     const assetIds = params?.['assets_ids'] as string[] | undefined;
 
-    // Track subscription
+    // Track subscription by channel for internal bookkeeping
     if (!this.subscriptions.has(channel)) {
       this.subscriptions.set(channel, new Set());
     }
     if (assetIds) {
       const channelSubs = this.subscriptions.get(channel)!;
-      assetIds.forEach(id => channelSubs.add(id));
+      assetIds.forEach(id => {
+        channelSubs.add(id);
+        this.allAssetIds.add(id);
+      });
     }
 
     // Send subscription if connected
-    if (this._state === WS_STATES.CONNECTED && this.ws) {
-      const message: SubscribeMessage = {
-        type: 'subscribe',
-        channel: channel as SubscribeMessage['channel'],
-      };
-
-      if (assetIds && assetIds.length > 0) {
-        message.assets_ids = assetIds;
+    if (this._state === WS_STATES.CONNECTED && this.ws && assetIds && assetIds.length > 0) {
+      // Polymarket WebSocket format:
+      // - Initial: {"type": "market", "assets_ids": [...]}
+      // - Adding more: {"assets_ids": [...], "operation": "subscribe"}
+      let message: SubscribeMessage;
+      
+      if (!this.hasInitialSubscription) {
+        message = {
+          type: 'market',
+          assets_ids: assetIds,
+        };
+        this.hasInitialSubscription = true;
+      } else {
+        message = {
+          assets_ids: assetIds,
+          operation: 'subscribe',
+        };
       }
 
       this.sendMessage(message);
-      // Log at info level so we can see subscriptions in production logs
       this.log.info('Sent subscription', { 
-        channel, 
-        assetIdCount: assetIds?.length ?? 0,
-        firstAssetId: assetIds?.[0]?.substring(0, 20) + '...',
+        isInitial: message.type === 'market',
+        assetIdCount: assetIds.length,
+        firstAssetId: assetIds[0]?.substring(0, 20) + '...',
       });
-    } else {
+    } else if (this._state !== WS_STATES.CONNECTED) {
       this.log.warn('Cannot subscribe - not connected', { channel, state: this._state });
     }
   }
@@ -209,7 +226,20 @@ export class PolymarketWebSocket extends EventEmitter implements IWebSocketClien
     if (assetIds) {
       const channelSubs = this.subscriptions.get(channel);
       if (channelSubs) {
-        assetIds.forEach(id => channelSubs.delete(id));
+        assetIds.forEach(id => {
+          channelSubs.delete(id);
+          // Only remove from allAssetIds if not in any other channel
+          let inOtherChannel = false;
+          for (const [ch, ids] of this.subscriptions.entries()) {
+            if (ch !== channel && ids.has(id)) {
+              inOtherChannel = true;
+              break;
+            }
+          }
+          if (!inOtherChannel) {
+            this.allAssetIds.delete(id);
+          }
+        });
         if (channelSubs.size === 0) {
           this.subscriptions.delete(channel);
         }
@@ -219,18 +249,14 @@ export class PolymarketWebSocket extends EventEmitter implements IWebSocketClien
     }
 
     // Send unsubscribe if connected
-    if (this._state === WS_STATES.CONNECTED && this.ws) {
+    if (this._state === WS_STATES.CONNECTED && this.ws && assetIds && assetIds.length > 0) {
       const message: UnsubscribeMessage = {
-        type: 'unsubscribe',
-        channel,
+        assets_ids: assetIds,
+        operation: 'unsubscribe',
       };
 
-      if (assetIds && assetIds.length > 0) {
-        message.assets_ids = assetIds;
-      }
-
       this.sendMessage(message);
-      this.log.debug('Unsubscribed from channel', { channel, assetIds });
+      this.log.debug('Unsubscribed from assets', { channel, assetIds });
     }
   }
 
@@ -444,12 +470,31 @@ export class PolymarketWebSocket extends EventEmitter implements IWebSocketClien
   }
 
   private resubscribe(): void {
-    for (const [channel, assetIds] of this.subscriptions.entries()) {
-      if (assetIds.size > 0) {
-        this.subscribe(channel, { assets_ids: Array.from(assetIds) });
-      } else {
-        this.subscribe(channel);
+    // Reset initial subscription flag since we reconnected
+    this.hasInitialSubscription = false;
+    
+    // Collect all unique asset IDs from all channels
+    const allAssets = new Set<string>();
+    for (const assetIds of this.subscriptions.values()) {
+      for (const id of assetIds) {
+        allAssets.add(id);
       }
+    }
+    
+    // Send single initial subscription with all assets
+    if (allAssets.size > 0) {
+      const assetArray = Array.from(allAssets);
+      const message: SubscribeMessage = {
+        type: 'market',
+        assets_ids: assetArray,
+      };
+      this.sendMessage(message);
+      this.hasInitialSubscription = true;
+      
+      this.log.info('Resubscribed to all assets', {
+        assetCount: assetArray.length,
+        firstAssetId: assetArray[0]?.substring(0, 20) + '...',
+      });
     }
   }
 }

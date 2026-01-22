@@ -1,5 +1,5 @@
 import { ClobClient, Side, OrderType, AssetType } from '@polymarket/clob-client';
-import { Wallet } from 'ethers';
+import { Wallet, Contract, providers } from 'ethers';
 import type { PolymarketConfig } from '../../config/schema.js';
 import { PLATFORMS, ORDER_TYPES, ORDER_SIDES, ORDER_STATUSES, OUTCOMES, MARKET_STATUSES } from '../../config/constants.js';
 import type {
@@ -24,6 +24,17 @@ import { startTimer, observeApiLatency, recordApiRequest, apiErrors } from '../.
  * Polymarket client implementation
  * Wraps the official @polymarket/clob-client SDK with normalization layer
  */
+// USDC.e contract address on Polygon (what Polymarket uses)
+const POLYGON_USDC_ADDRESS = '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174';
+// Minimal ERC20 ABI for balanceOf
+const ERC20_ABI = ['function balanceOf(address owner) view returns (uint256)'];
+// Polygon RPC endpoints (public)
+const POLYGON_RPC_URLS = [
+  'https://polygon-rpc.com',
+  'https://rpc-mainnet.matic.network',
+  'https://rpc-mainnet.maticvigil.com',
+];
+
 export class PolymarketClient implements IPlatformClient {
   readonly platform = PLATFORMS.POLYMARKET;
 
@@ -692,7 +703,18 @@ export class PolymarketClient implements IPlatformClient {
       });
 
       // Must specify asset_type: COLLATERAL to get USDC balance
-      // For signature type 2 (GNOSIS), the SDK should use the funder address from constructor
+      // Note: The SDK getBalanceAllowance doesn't support signature_type parameter
+      // It should use the funder address from constructor, but often doesn't work for GNOSIS wallets
+      // We have a fallback to query on-chain balance directly if this returns 0
+
+      this.log.debug('Calling getBalanceAllowance', {
+        assetType: 'COLLATERAL',
+        signatureType: this.config.signatureType,
+        funderAddress: this.config.funderAddress,
+        eoaAddress: this.signer?.address,
+        note: 'SDK may return 0 for GNOSIS wallets - will fallback to on-chain query if needed',
+      });
+
       const balanceData = await this.client!.getBalanceAllowance({
         asset_type: AssetType.COLLATERAL,
       });
@@ -734,20 +756,45 @@ export class PolymarketClient implements IPlatformClient {
         }
       }
 
-      // Check if balance is 0 and we have a funder address configured
-      if (available === 0 && this.config.funderAddress && this.config.signatureType === 'GNOSIS') {
-        this.log.warn('Balance is 0 - possible issues:', {
+      // If SDK returns 0 and we have a funder address, try direct blockchain query as fallback
+      if (available === 0 && this.config.funderAddress) {
+        this.log.info('SDK returned 0 balance, trying direct blockchain query as fallback', {
           funderAddress: this.config.funderAddress,
-          eoaAddress: this.signer?.address,
           signatureType: this.config.signatureType,
-          rawBalance: balance,
-          suggestions: [
-            '1. Verify funder address matches your Polymarket profile wallet address',
-            '2. Check if funds are actually in the proxy wallet (not EOA)',
-            '3. Ensure API credentials were created for the correct wallet',
-            '4. Try checking balance on Polymarket website to confirm',
-          ],
         });
+
+        const onChainBalance = await this.queryOnChainUsdcBalance(this.config.funderAddress);
+
+        if (onChainBalance > 0) {
+          this.log.info('Found USDC balance via direct blockchain query', {
+            onChainBalance,
+            funderAddress: this.config.funderAddress,
+            note: 'SDK getBalanceAllowance returned 0 but on-chain balance exists. Using on-chain value.',
+          });
+          available = onChainBalance;
+        } else {
+          // Also try EOA address in case funds are there
+          const eoaBalance = await this.queryOnChainUsdcBalance(this.signer?.address || '');
+          if (eoaBalance > 0) {
+            this.log.warn('USDC found in EOA address, not proxy wallet', {
+              eoaAddress: this.signer?.address,
+              eoaBalance,
+              funderAddress: this.config.funderAddress,
+              suggestion: 'Funds are in EOA wallet. For Polymarket trading, funds should be in the proxy wallet (funder address).',
+            });
+            // Don't use EOA balance as it's not available for Polymarket trading
+          } else {
+            this.log.warn('Balance is 0 on both SDK and blockchain', {
+              funderAddress: this.config.funderAddress,
+              eoaAddress: this.signer?.address,
+              suggestions: [
+                '1. Verify funder address matches your Polymarket profile wallet address',
+                '2. Check if funds are deposited on Polymarket',
+                '3. Funds may be locked in open positions',
+              ],
+            });
+          }
+        }
       }
 
       this.log.info('Balance fetched', {
@@ -865,6 +912,44 @@ export class PolymarketClient implements IPlatformClient {
     if (this.readOnly) {
       throw new Error('Client is in read-only mode. Provide a private key to enable trading.');
     }
+  }
+
+  /**
+   * Query USDC balance directly from Polygon blockchain
+   * This is a fallback when the SDK returns 0 but funds exist on-chain
+   */
+  private async queryOnChainUsdcBalance(address: string): Promise<number> {
+    if (!address) return 0;
+
+    for (const rpcUrl of POLYGON_RPC_URLS) {
+      try {
+        const provider = new providers.JsonRpcProvider(rpcUrl);
+        const usdcContract = new Contract(POLYGON_USDC_ADDRESS, ERC20_ABI, provider);
+
+        const balanceRaw = await usdcContract['balanceOf'](address);
+        // USDC has 6 decimals
+        const balance = Number(balanceRaw) / 1e6;
+
+        this.log.debug('On-chain USDC balance query successful', {
+          address,
+          balanceRaw: balanceRaw.toString(),
+          balanceUsdc: balance,
+          rpcUrl,
+        });
+
+        return balance;
+      } catch (error) {
+        this.log.debug('RPC query failed, trying next endpoint', {
+          rpcUrl,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        // Try next RPC endpoint
+        continue;
+      }
+    }
+
+    this.log.warn('All RPC endpoints failed for on-chain balance query', { address });
+    return 0;
   }
 
   private mapSignatureType(type: 'EOA' | 'PROXY' | 'GNOSIS'): SignatureType {

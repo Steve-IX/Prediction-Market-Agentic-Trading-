@@ -39,14 +39,14 @@ export interface OrderbookImbalanceConfig {
 }
 
 const DEFAULT_CONFIG: OrderbookImbalanceConfig = {
-  minImbalanceRatio: 2.0, // 2x more on one side
-  depthLevels: 5,
-  maxPositionSize: 100,
-  minPositionSize: 10,
-  takeProfitPercent: 2,
+  minImbalanceRatio: 1.5, // 1.5x more on one side (lowered from 2.0)
+  depthLevels: 10, // Analyze more depth (increased from 5)
+  maxPositionSize: 50, // Max for small balance
+  minPositionSize: 1, // Min $1 position (lowered for small balance)
+  takeProfitPercent: 1.5, // Take profit earlier
   stopLossPercent: 3,
-  minTotalVolume: 100,
-  maxSpreadPercent: 5,
+  minTotalVolume: 20, // Lowered from 100
+  maxSpreadPercent: 8, // Allow wider spreads (increased from 5)
 };
 
 /**
@@ -230,16 +230,16 @@ export class OrderbookImbalanceStrategy extends EventEmitter {
   private calculateConfidence(imbalanceRatio: number, spreadPercent: number): number {
     let confidence = 0.5;
 
-    // Higher imbalance = higher confidence
+    // Higher imbalance = higher confidence (lowered thresholds)
     const effectiveRatio = imbalanceRatio > 1 ? imbalanceRatio : 1 / imbalanceRatio;
-    if (effectiveRatio >= 3) confidence += 0.2;
-    else if (effectiveRatio >= 2.5) confidence += 0.15;
-    else if (effectiveRatio >= 2) confidence += 0.1;
+    if (effectiveRatio >= 2.5) confidence += 0.2;
+    else if (effectiveRatio >= 2.0) confidence += 0.15;
+    else if (effectiveRatio >= 1.5) confidence += 0.1;
 
-    // Tighter spread = higher confidence
-    if (spreadPercent < 1) confidence += 0.15;
-    else if (spreadPercent < 2) confidence += 0.1;
-    else if (spreadPercent < 3) confidence += 0.05;
+    // Tighter spread = higher confidence (relaxed thresholds)
+    if (spreadPercent < 2) confidence += 0.15;
+    else if (spreadPercent < 4) confidence += 0.1;
+    else if (spreadPercent < 6) confidence += 0.05;
 
     return Math.min(1, Math.max(0, confidence));
   }

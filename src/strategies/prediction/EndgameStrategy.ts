@@ -28,13 +28,13 @@ export interface EndgameConfig {
 }
 
 const DEFAULT_CONFIG: EndgameConfig = {
-  minProbability: 0.90, // 90% certain
+  minProbability: 0.75, // 75% certain (lowered from 90%)
   maxProbability: 0.98, // Not 99%+ (might be stale data)
-  maxHoursToResolution: 168, // 1 week
-  minHoursToResolution: 1, // At least 1 hour to resolution
-  maxPositionSize: 200, // Can go larger since high certainty
-  minPositionSize: 20,
-  minAnnualizedReturn: 50, // 50% annualized minimum
+  maxHoursToResolution: 336, // 2 weeks (increased from 1 week)
+  minHoursToResolution: 0.5, // At least 30 min to resolution (lowered)
+  maxPositionSize: 50, // Max position for small balance
+  minPositionSize: 1, // Min $1 position (lowered for small balance)
+  minAnnualizedReturn: 15, // 15% annualized minimum (lowered from 50%)
 };
 
 /**

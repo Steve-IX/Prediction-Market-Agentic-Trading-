@@ -32,17 +32,17 @@ export interface SpreadHunterConfig {
 }
 
 const DEFAULT_CONFIG: SpreadHunterConfig = {
-  minSpreadPercent: 2.0, // Target markets with >2% spread
-  maxSpreadPercent: 15.0, // Avoid markets with >15% spread (too illiquid)
-  minBidSize: 10, // Minimum $10 on bid side
-  minAskSize: 10, // Minimum $10 on ask side
-  maxBidAskRatio: 5.0, // Bid depth shouldn't be >5x ask depth (or vice versa)
+  minSpreadPercent: 1.5, // Target markets with >1.5% spread (lowered from 2%)
+  maxSpreadPercent: 20.0, // Avoid markets with >20% spread (increased from 15%)
+  minBidSize: 5, // Minimum $5 on bid side (lowered from $10)
+  minAskSize: 5, // Minimum $5 on ask side (lowered from $10)
+  maxBidAskRatio: 8.0, // Allow more imbalance (increased from 5.0)
   maxPositionSize: 50, // Max $50 position
-  minPositionSize: 10, // Min $10 position
-  takeProfitPercent: 1.5, // Take profit when spread narrows by 1.5%
-  stopLossPercent: 3.0, // Stop loss if spread widens by 3%
-  minMarketAgeHours: 1, // Market must be active for at least 1 hour
-  maxMarketAgeHours: 720, // Avoid markets resolving in <30 days
+  minPositionSize: 1, // Min $1 position (lowered for small balance)
+  takeProfitPercent: 1.0, // Take profit when spread narrows by 1%
+  stopLossPercent: 4.0, // Stop loss if spread widens by 4%
+  minMarketAgeHours: 0.5, // Market must be active for at least 30 min
+  maxMarketAgeHours: 1440, // Allow markets up to 60 days out
 };
 
 /**
@@ -131,12 +131,12 @@ export class SpreadHunterStrategy extends EventEmitter {
       return null; // Let ProbabilitySumStrategy handle this
     }
 
-    // Calculate expected profit after fees (assuming 2% platform fee)
-    const platformFeePercent = 2.0;
+    // Calculate expected profit after fees (assuming 1% platform fee)
+    const platformFeePercent = 1.0;
     const profitAfterFees = (spreadPercent - platformFeePercent) / 100;
 
-    // Only trade if we can profit after fees
-    if (profitAfterFees <= 0) {
+    // Only trade if we can profit after fees (lowered threshold)
+    if (profitAfterFees <= -0.005) { // Allow slightly negative if spread is promising
       return null;
     }
 
@@ -188,8 +188,8 @@ export class SpreadHunterStrategy extends EventEmitter {
     const liquidityScore = Math.min(1.0, availableLiquidity / 100); // More liquidity = higher confidence
     const confidence = (spreadScore * 0.6 + liquidityScore * 0.4); // Weight spread more
 
-    if (confidence < 0.5) {
-      return null; // Not confident enough
+    if (confidence < 0.3) {
+      return null; // Not confident enough (lowered from 0.5)
     }
 
     // Create signal

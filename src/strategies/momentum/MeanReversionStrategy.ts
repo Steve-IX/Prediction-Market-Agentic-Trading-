@@ -30,15 +30,15 @@ export interface MeanReversionConfig {
 }
 
 const DEFAULT_CONFIG: MeanReversionConfig = {
-  minDeviation: 3, // 3% from VWAP
-  maxDeviation: 15, // 15% max (above this might be real news)
-  rsiOverbought: 75,
-  rsiOversold: 25,
-  maxPositionSize: 100,
-  minPositionSize: 10,
-  takeProfitPercent: 3,
-  stopLossPercent: 5,
-  minPriceAge: 20,
+  minDeviation: 1.5, // 1.5% from VWAP (lowered from 3%)
+  maxDeviation: 20, // 20% max (increased from 15%)
+  rsiOverbought: 65, // Lowered from 75 (trigger earlier)
+  rsiOversold: 35, // Raised from 25 (trigger earlier)
+  maxPositionSize: 50, // Max for small balance
+  minPositionSize: 1, // Min $1 position
+  takeProfitPercent: 2, // Take profit earlier
+  stopLossPercent: 4, // Tighter stop
+  minPriceAge: 10, // Lowered from 20 (need less data)
 };
 
 /**

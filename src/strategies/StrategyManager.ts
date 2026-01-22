@@ -70,7 +70,7 @@ const DEFAULT_CONFIG: StrategyManagerConfig = {
   enableProbabilitySum: true, // Enabled by default - most reliable strategy
   enableEndgame: true, // Enabled by default
   maxConcurrentSignals: 3,
-  signalCooldownMs: 30000, // 30 seconds between signals on same market
+  signalCooldownMs: 300000, // 5 minutes between signals on same market (anti-churn)
 };
 
 /**
@@ -358,7 +358,12 @@ export class StrategyManager extends EventEmitter {
     this.momentumStrategy.clearSignal(signal.marketId);
     this.meanReversionStrategy.clearSignal(signal.marketId);
     this.orderbookImbalanceStrategy.clearSignal(signal.marketId);
-    this.setCooldown(signal.marketId);
+    // Set 10-minute post-trade cooldown to prevent churning
+    this.setCooldown(signal.marketId, 600000); // 10 minutes = 600,000ms
+    this.log.info('Post-trade cooldown set', {
+      market: signal.market.title.substring(0, 40),
+      cooldownMinutes: 10,
+    });
   }
 
   /**
@@ -446,10 +451,11 @@ export class StrategyManager extends EventEmitter {
     return new Date() < cooldownUntil;
   }
 
-  private setCooldown(marketId: string): void {
+  private setCooldown(marketId: string, durationMs?: number): void {
+    const cooldownMs = durationMs ?? this.config.signalCooldownMs;
     this.signalCooldowns.set(
       marketId,
-      new Date(Date.now() + this.config.signalCooldownMs)
+      new Date(Date.now() + cooldownMs)
     );
   }
 

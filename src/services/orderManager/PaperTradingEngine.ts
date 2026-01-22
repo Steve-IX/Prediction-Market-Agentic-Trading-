@@ -138,7 +138,7 @@ export class PaperTradingEngine extends EventEmitter {
   /**
    * Place a paper trade order
    */
-  async placeOrder(order: OrderRequest, orderBook?: OrderBook): Promise<NormalizedOrder> {
+  async placeOrder(order: OrderRequest, _orderBook?: OrderBook): Promise<NormalizedOrder> {
     // Simulate latency
     await this.simulateLatency();
 
@@ -200,8 +200,8 @@ export class PaperTradingEngine extends EventEmitter {
       size: order.size,
     });
 
-    // Attempt to fill order
-    const filledOrder = await this.attemptFill(normalizedOrder, orderBook);
+    // Attempt to fill order (orderBook param kept for interface compatibility but not used)
+    const filledOrder = await this.attemptFill(normalizedOrder);
 
     return filledOrder;
   }
@@ -209,7 +209,7 @@ export class PaperTradingEngine extends EventEmitter {
   /**
    * Attempt to fill an order
    */
-  private async attemptFill(order: NormalizedOrder, orderBook?: OrderBook): Promise<NormalizedOrder> {
+  private async attemptFill(order: NormalizedOrder): Promise<NormalizedOrder> {
     // Determine if order should fill
     const shouldFill = Math.random() < this.config.fills.fillRate;
 
@@ -237,7 +237,7 @@ export class PaperTradingEngine extends EventEmitter {
     }
 
     // Calculate fill price with slippage
-    const fillPrice = this.calculateFillPrice(order, orderBook);
+    const fillPrice = this.calculateFillPrice(order);
     const fillSize = order.size * fillPercent;
 
     // Execute the fill
@@ -247,17 +247,10 @@ export class PaperTradingEngine extends EventEmitter {
   /**
    * Calculate fill price with slippage
    */
-  private calculateFillPrice(order: NormalizedOrder, orderBook?: OrderBook): number {
-    let basePrice = order.price;
-
-    // Use order book prices if available
-    if (orderBook) {
-      if (order.side === ORDER_SIDES.BUY && orderBook.asks.length > 0) {
-        basePrice = orderBook.asks[0]!.price;
-      } else if (order.side === ORDER_SIDES.SELL && orderBook.bids.length > 0) {
-        basePrice = orderBook.bids[0]!.price;
-      }
-    }
+  private calculateFillPrice(order: NormalizedOrder): number {
+    // ALWAYS use order price (signal price) - orderbook may have incorrect prices
+    // Paper trading should simulate realistic fills based on the signal, not corrupted orderbook data
+    const basePrice = order.price;
 
     // Calculate slippage
     const sizeSlippage = (order.size / 1000) * this.config.slippage.sizeImpact;

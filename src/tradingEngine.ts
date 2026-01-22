@@ -17,6 +17,7 @@ import { StrategyManager } from './strategies/StrategyManager.js';
 import { SignalExecutor, type SignalExecutionResult } from './strategies/SignalExecutor.js';
 import type { TradingSignal } from './strategies/momentum/MomentumStrategy.js';
 import { KillSwitch } from './risk/KillSwitch.js';
+import { PricePoller, type PolledPriceUpdate } from './services/pricePoller/PricePoller.js';
 import { logger, type Logger } from './utils/logger.js';
 import { arbitrageOpportunities, arbitrageExecutions, arbitrageProfit } from './utils/metrics.js';
 
@@ -102,7 +103,10 @@ export class TradingEngine extends EventEmitter {
 
   // Risk
   private killSwitch: KillSwitch;
-  
+
+  // Price polling
+  private pricePoller: PricePoller;
+
   // Orderbook cache for strategies
   private orderbooks: Map<string, OrderBook> = new Map();
 
@@ -203,6 +207,12 @@ export class TradingEngine extends EventEmitter {
     // Create risk management
     this.killSwitch = new KillSwitch(this.orderManager);
 
+    // Create price poller for active price data
+    this.pricePoller = new PricePoller({
+      intervalMs: 10000, // Poll every 10 seconds
+      maxMarkets: 200, // Track top 200 markets by volume
+    });
+
     this.setupEventListeners();
   }
 
@@ -295,6 +305,12 @@ export class TradingEngine extends EventEmitter {
     // Start kill switch monitoring
     this.killSwitch.start();
 
+    // Start price poller for active price data
+    this.pricePoller.start();
+    this.log.info('Price poller started', {
+      marketsToTrack: this.pricePoller.getStats().trackedMarkets,
+    });
+
     // Start polling interval as fallback
     if (this.config.scanIntervalMs > 0) {
       this.pollingInterval = setInterval(
@@ -328,6 +344,9 @@ export class TradingEngine extends EventEmitter {
       clearInterval(this.pollingInterval);
       this.pollingInterval = null;
     }
+
+    // Stop price poller
+    this.pricePoller.stop();
 
     // Stop kill switch monitoring
     this.killSwitch.stop();
@@ -483,6 +502,11 @@ export class TradingEngine extends EventEmitter {
       this.log.info('Kill switch reset');
       this.emit('killSwitchReset');
     });
+
+    // Price poller events
+    this.pricePoller.on('priceUpdate', (update: PolledPriceUpdate) => {
+      this.onPolledPriceUpdate(update);
+    });
   }
 
   private async onPriceUpdate(update: PriceUpdate): Promise<void> {
@@ -543,6 +567,18 @@ export class TradingEngine extends EventEmitter {
 
     // Trigger scan (will log internally)
     await this.scanForOpportunities();
+  }
+
+  private onPolledPriceUpdate(update: PolledPriceUpdate): void {
+    // Track price history for strategies
+    // Use the price directly since polled updates are per-outcome
+    this.strategyManager.processPriceUpdate(
+      update.marketId,
+      update.price,
+      undefined, // volume not available in polled updates
+      undefined, // bidSize not available
+      undefined  // askSize not available
+    );
   }
 
   private async scanForOpportunities(): Promise<ArbitrageOpportunity[]> {
@@ -765,6 +801,10 @@ export class TradingEngine extends EventEmitter {
 
       this.markets.set(PLATFORMS.POLYMARKET, polymarketMarkets);
       this.markets.set(PLATFORMS.KALSHI, kalshiMarkets);
+
+      // Update price poller with new markets (top 200 by volume)
+      const allMarkets = [...polymarketMarkets, ...kalshiMarkets];
+      this.pricePoller.updateTrackedMarkets(allMarkets);
 
       this.log.info('Markets refreshed', {
         polymarket: polymarketMarkets.length,

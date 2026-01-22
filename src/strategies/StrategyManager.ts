@@ -258,23 +258,65 @@ export class StrategyManager extends EventEmitter {
         strategies: [...new Set(allSignals.map(s => s.strategy))],
       });
     } else if (marketsWithPrices.length > 0) {
-      // Log summary of why no signals found (every 5th scan to avoid spam)
+      // Log detailed diagnostics every 5th scan
       if (Math.random() < 0.2) {
-        const sampleMarket = marketsWithPrices[0];
-        if (sampleMarket) {
-          const yes = sampleMarket.outcomes.find(o => o.type === OUTCOMES.YES);
-          const no = sampleMarket.outcomes.find(o => o.type === OUTCOMES.NO);
-          const sum = (yes?.bestAsk || 0) + (no?.bestAsk || 0);
-          this.log.info('No signals found - sample market analysis', {
-            marketsAnalyzed: activeMarkets.length,
-            binaryMarkets: binaryMarkets.length,
-            marketsWithPrices: marketsWithPrices.length,
-            sampleSum: sum.toFixed(4),
-            sampleYesAsk: yes?.bestAsk?.toFixed(4),
-            sampleNoAsk: no?.bestAsk?.toFixed(4),
-            note: 'Markets may not meet strategy thresholds (e.g., probability sum < 1.0)',
-          });
+        // Analyze why strategies aren't triggering
+        let marketsWithEndDate = 0;
+        let marketsNearResolution = 0;
+        let highProbMarkets = 0;
+        let sumBelowOne = 0;
+        let marketsWithStats = 0;
+
+        for (const market of marketsWithPrices.slice(0, 100)) { // Sample first 100
+          const yes = market.outcomes.find(o => o.type === OUTCOMES.YES);
+          const no = market.outcomes.find(o => o.type === OUTCOMES.NO);
+          const yesAsk = yes?.bestAsk || 0;
+          const noAsk = no?.bestAsk || 0;
+          const sum = yesAsk + noAsk;
+
+          // Check for endgame conditions
+          const endDate = (market as any).endDate || (market as any).resolutionTime;
+          if (endDate) {
+            marketsWithEndDate++;
+            const hoursToRes = (new Date(endDate).getTime() - Date.now()) / (1000 * 60 * 60);
+            if (hoursToRes > 0.5 && hoursToRes <= 336) {
+              marketsNearResolution++;
+            }
+          }
+
+          // Check high probability (>75%)
+          if (yesAsk >= 0.75 || noAsk >= 0.75) {
+            highProbMarkets++;
+          }
+
+          // Check sum < 1
+          if (sum < 1.0) {
+            sumBelowOne++;
+          }
+
+          // Check price stats
+          if (this.priceTracker.getStats(market.externalId, 60)) {
+            marketsWithStats++;
+          }
         }
+
+        const sampleMarket = marketsWithPrices[0];
+        const yes = sampleMarket?.outcomes.find(o => o.type === OUTCOMES.YES);
+        const no = sampleMarket?.outcomes.find(o => o.type === OUTCOMES.NO);
+        const sum = (yes?.bestAsk || 0) + (no?.bestAsk || 0);
+
+        this.log.info('No signals - strategy diagnostics', {
+          totalMarkets: marketsWithPrices.length,
+          marketsWithEndDate,
+          marketsNearResolution,
+          highProbMarkets,
+          sumBelowOne,
+          marketsWithPriceHistory: marketsWithStats,
+          orderbooksAvailable: orderbooks?.size || 0,
+          sampleSum: sum.toFixed(4),
+          sampleYesAsk: yes?.bestAsk?.toFixed(4),
+          sampleNoAsk: no?.bestAsk?.toFixed(4),
+        });
       }
     }
 

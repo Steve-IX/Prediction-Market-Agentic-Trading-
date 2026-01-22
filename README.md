@@ -98,17 +98,17 @@ See `.env.example` for all configuration options.
 
 ```
 src/
-Ôö£ÔöÇÔöÇ clients/           # Platform API clients
-Ôöé   Ôö£ÔöÇÔöÇ polymarket/   # Polymarket CLOB client
-Ôöé   Ôö£ÔöÇÔöÇ kalshi/       # Kalshi REST client
-Ôöé   ÔööÔöÇÔöÇ shared/       # Shared interfaces
-Ôö£ÔöÇÔöÇ config/           # Configuration and constants
-Ôö£ÔöÇÔöÇ database/         # Drizzle ORM schema
-Ôö£ÔöÇÔöÇ services/         # Business logic services
-Ôö£ÔöÇÔöÇ strategies/       # Trading strategies
-Ôö£ÔöÇÔöÇ risk/             # Risk management
-Ôö£ÔöÇÔöÇ api/              # REST API
-ÔööÔöÇÔöÇ utils/            # Utilities (logger, metrics, retry)
+ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ clients/           # Platform API clients
+ï¿½ï¿½ï¿½   ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ polymarket/   # Polymarket CLOB client
+ï¿½ï¿½ï¿½   ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ kalshi/       # Kalshi REST client
+ï¿½ï¿½ï¿½   ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ shared/       # Shared interfaces
+ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ config/           # Configuration and constants
+ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ database/         # Drizzle ORM schema
+ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ services/         # Business logic services
+ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ strategies/       # Trading strategies
+ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ risk/             # Risk management
+ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ api/              # REST API
+ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ utils/            # Utilities (logger, metrics, retry)
 ```
 
 ## Development Status
@@ -154,11 +154,11 @@ This project is configured for deployment on Railway (application) and Neon (dat
 - `src/database/migrations/` - Database migration files
 
 **Important Notes:**
-- Ô£à Neon includes TimescaleDB support (enable in Neon Console)
-- ÔÜá´©Å Railway free tier may sleep - use Pro plan for 24/7 uptime
-- Ô£à Always start with `PAPER_TRADING=true`
-- Ô£à Never commit `.env` files or API keys
-- Ô£à Use pooled connection string from Neon for better performance
+- Ô£ï¿½ Neon includes TimescaleDB support (enable in Neon Console)
+- ï¿½ï¿½á´©ï¿½ Railway free tier may sleep - use Pro plan for 24/7 uptime
+- Ô£ï¿½ Always start with `PAPER_TRADING=true`
+- Ô£ï¿½ Never commit `.env` files or API keys
+- Ô£ï¿½ Use pooled connection string from Neon for better performance
 
 ## License
 

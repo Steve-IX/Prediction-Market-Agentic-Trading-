@@ -114,11 +114,12 @@ function buildConfigFromEnv(): unknown {
     },
 
     strategies: {
-      momentumMinMomentum: parseNumber(env['MOMENTUM_MIN_MOMENTUM'], 0.4),
-      momentumMinChangePercent: parseNumber(env['MOMENTUM_MIN_CHANGE_PERCENT'], 2),
-      meanReversionMinDeviation: parseNumber(env['MEAN_REVERSION_MIN_DEVIATION'], 3),
+      // Lowered thresholds for prediction markets (less volatile than stocks)
+      momentumMinMomentum: parseNumber(env['MOMENTUM_MIN_MOMENTUM'], 0.15), // Was 0.4
+      momentumMinChangePercent: parseNumber(env['MOMENTUM_MIN_CHANGE_PERCENT'], 0.5), // Was 2
+      meanReversionMinDeviation: parseNumber(env['MEAN_REVERSION_MIN_DEVIATION'], 1.0), // Was 3
       meanReversionMaxDeviation: parseNumber(env['MEAN_REVERSION_MAX_DEVIATION'], 15),
-      orderbookImbalanceRatio: parseNumber(env['ORDERBOOK_IMBALANCE_RATIO'], 2),
+      orderbookImbalanceRatio: parseNumber(env['ORDERBOOK_IMBALANCE_RATIO'], 1.5), // Was 2
       // Spread hunter strategy
       spreadHunterMinSpreadPercent: parseNumber(env['SPREAD_HUNTER_MIN_SPREAD_PERCENT'], 2.0),
       spreadHunterMaxSpreadPercent: parseNumber(env['SPREAD_HUNTER_MAX_SPREAD_PERCENT'], 15.0),
@@ -129,10 +130,11 @@ function buildConfigFromEnv(): unknown {
       endgameMinProbability: parseNumber(env['ENDGAME_MIN_PROBABILITY'], 0.90),
       endgameMaxHoursToResolution: parseNumber(env['ENDGAME_MAX_HOURS'], 168),
       endgameMinAnnualizedReturn: parseNumber(env['ENDGAME_MIN_ANNUALIZED_RETURN'], 50),
-      // Position sizing
+      // Position sizing & cooldowns
       maxPositionSize: parseNumber(env['STRATEGY_MAX_POSITION_SIZE'], 100),
       minPositionSize: parseNumber(env['STRATEGY_MIN_POSITION_SIZE'], 10),
-      signalCooldownMs: parseNumber(env['STRATEGY_SIGNAL_COOLDOWN_MS'], 30000),
+      signalCooldownMs: parseNumber(env['STRATEGY_SIGNAL_COOLDOWN_MS'], 300000), // 5 minutes (was 30s)
+      postTradeCooldownMs: parseNumber(env['POST_TRADE_COOLDOWN_MS'], 600000), // 10 minutes anti-churn
     },
 
     anthropic: {

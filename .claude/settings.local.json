@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run build:*)",
+      "Bash(git add:*)",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nFix Polymarket balance for GNOSIS proxy wallets\n\nAdd on-chain USDC balance fallback when SDK returns 0. The Polymarket\nSDK''s getBalanceAllowance doesn''t properly query proxy wallet balances,\nso we now directly query the Polygon blockchain as a fallback.\n\n- Add direct USDC contract query on Polygon for funder address\n- Use multiple RPC endpoints for reliability\n- Add diagnostic logging for balance source\nEOF\n\\)\")",
+      "Bash(git push:*)",
+      "Bash(git pull:*)",
+      "Bash(git stash:*)",
+      "Bash(git rebase:*)",
+      "Bash(git commit:*)",
+      "Bash(git reset:*)"
+    ]
+  }
+}

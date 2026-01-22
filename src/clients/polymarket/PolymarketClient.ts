@@ -297,6 +297,16 @@ export class PolymarketClient implements IPlatformClient {
         apiKey: apiCreds.key.substring(0, 8) + '...',
       });
 
+      // ⚠️ TEMPORARY: Log full credentials for user to save
+      // TODO: Remove this after saving credentials to environment variables
+      this.log.warn('🔑 SAVE THESE AUTO-DERIVED CREDENTIALS TO YOUR .ENV FILE:', {
+        POLYMARKET_API_KEY: apiCreds.key,
+        POLYMARKET_API_SECRET: apiCreds.secret,
+        POLYMARKET_API_PASSPHRASE: apiCreds.passphrase,
+        note: 'Add these to your environment variables to avoid auto-deriving on every startup',
+        warning: 'These credentials are sensitive - do not share them publicly',
+      });
+
       // Initialize trading client with credentials
       // Pass funder address for proxy wallet users (signature type GNOSIS)
       this.client = new ClobClient(

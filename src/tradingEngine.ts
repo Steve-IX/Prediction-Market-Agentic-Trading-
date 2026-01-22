@@ -164,6 +164,7 @@ export class TradingEngine extends EventEmitter {
       enableProbabilitySum: this.appConfig.features.enableProbabilitySumStrategy ?? true,
       enableEndgame: this.appConfig.features.enableEndgameStrategy ?? true,
       signalCooldownMs: this.appConfig.strategies.signalCooldownMs,
+      postTradeCooldownMs: this.appConfig.strategies.postTradeCooldownMs,
       momentumConfig: {
         minMomentum: this.appConfig.strategies.momentumMinMomentum,
         minChangePercent: this.appConfig.strategies.momentumMinChangePercent,

@@ -21,7 +21,8 @@ export interface StrategyManagerConfig {
   enableProbabilitySum: boolean; // Prediction market arbitrage (YES+NO != $1)
   enableEndgame: boolean; // High probability near resolution
   maxConcurrentSignals: number;
-  signalCooldownMs: number;
+  signalCooldownMs: number; // Cooldown between signal generation (5 minutes)
+  postTradeCooldownMs: number; // Cooldown after trade execution (10 minutes anti-churn)
   // Strategy-specific configs from environment variables
   momentumConfig?: {
     minMomentum?: number;
@@ -70,7 +71,8 @@ const DEFAULT_CONFIG: StrategyManagerConfig = {
   enableProbabilitySum: true, // Enabled by default - most reliable strategy
   enableEndgame: true, // Enabled by default
   maxConcurrentSignals: 3,
-  signalCooldownMs: 300000, // 5 minutes between signals on same market (anti-churn)
+  signalCooldownMs: 300000, // 5 minutes between signals on same market
+  postTradeCooldownMs: 600000, // 10 minutes after trade execution (anti-churn)
 };
 
 /**
@@ -358,11 +360,11 @@ export class StrategyManager extends EventEmitter {
     this.momentumStrategy.clearSignal(signal.marketId);
     this.meanReversionStrategy.clearSignal(signal.marketId);
     this.orderbookImbalanceStrategy.clearSignal(signal.marketId);
-    // Set 10-minute post-trade cooldown to prevent churning
-    this.setCooldown(signal.marketId, 600000); // 10 minutes = 600,000ms
+    // Set post-trade cooldown to prevent churning (buy/sell same market repeatedly)
+    this.setCooldown(signal.marketId, this.config.postTradeCooldownMs);
     this.log.info('Post-trade cooldown set', {
       market: signal.market.title.substring(0, 40),
-      cooldownMinutes: 10,
+      cooldownMinutes: (this.config.postTradeCooldownMs / 60000).toFixed(0),
     });
   }
 

@@ -85,37 +85,38 @@ const FeatureFlagsSchema = z.object({
 
 // Strategy configuration schema
 const StrategyConfigSchema = z.object({
-  // Momentum strategy
-  momentumMinMomentum: z.number().min(0).max(1).default(0.4),
-  momentumMinChangePercent: z.number().min(0).default(2),
-  
-  // Mean reversion strategy
-  meanReversionMinDeviation: z.number().min(0).default(3),
+  // Momentum strategy - lowered thresholds for prediction markets
+  momentumMinMomentum: z.number().min(0).max(1).default(0.15), // Was 0.4
+  momentumMinChangePercent: z.number().min(0).default(0.5), // Was 2
+
+  // Mean reversion strategy - lowered thresholds for prediction markets
+  meanReversionMinDeviation: z.number().min(0).default(1.0), // Was 3
   meanReversionMaxDeviation: z.number().min(0).default(15),
-  
-  // Orderbook imbalance strategy
-  orderbookImbalanceRatio: z.number().min(1).default(2),
-  
+
+  // Orderbook imbalance strategy - lowered threshold
+  orderbookImbalanceRatio: z.number().min(1).default(1.5), // Was 2
+
   // Spread hunter strategy (targets illiquid markets)
   spreadHunterMinSpreadPercent: z.number().min(0).default(2.0),
   spreadHunterMaxSpreadPercent: z.number().min(0).default(15.0),
   spreadHunterMinBidSize: z.number().min(0).default(10),
   spreadHunterMinAskSize: z.number().min(0).default(10),
-  
+
   // Probability sum strategy (NEW)
   probabilitySumMinMispricingPercent: z.number().min(0).default(0.5),
-  
+
   // Endgame strategy (NEW)
   endgameMinProbability: z.number().min(0).max(1).default(0.90),
   endgameMaxHoursToResolution: z.number().positive().default(168), // 1 week
   endgameMinAnnualizedReturn: z.number().positive().default(50), // 50%
-  
+
   // Position sizing
   maxPositionSize: z.number().positive().default(100),
   minPositionSize: z.number().positive().default(10),
-  
-  // Cooldown between signals on same market
-  signalCooldownMs: z.number().positive().default(30000),
+
+  // Cooldowns - CRITICAL for preventing churn
+  signalCooldownMs: z.number().positive().default(300000), // 5 minutes (was 30s)
+  postTradeCooldownMs: z.number().positive().default(600000), // 10 minutes anti-churn
 });
 
 // Anthropic configuration schema

@@ -128,19 +128,20 @@ export class PolymarketClient implements IPlatformClient {
         };
 
         // Initialize trading client with provided credentials
-        // IMPORTANT: Only pass funderAddress for GNOSIS signature type
-        // For EOA mode, maker must equal signer, so don't pass funderAddress
-        const funderForClient = signatureType === 2 ? this.config.funderAddress : undefined;
+        // IMPORTANT: Pass funderAddress for PROXY (1) and GNOSIS (2) signature types
+        // For EOA mode (0), maker must equal signer, so don't pass funderAddress
+        const funderForClient = signatureType === 0 ? undefined : this.config.funderAddress;
 
         this.log.info('Initializing ClobClient', {
           host: this.config.host,
           chainId: this.config.chainId,
           signerAddress: this.signer.address,
           signatureType,
-          funderAddress: funderForClient || '(not passed - EOA mode uses signer as maker)',
+          signatureTypeName: signatureType === 0 ? 'EOA' : signatureType === 1 ? 'POLY_GNOSIS_SAFE' : 'GNOSIS',
+          funderAddress: funderForClient || '(not passed - EOA mode)',
           note: signatureType === 0
             ? 'EOA mode: signer signs for itself, maker = signer'
-            : 'GNOSIS mode: signer signs for proxy, maker = funderAddress',
+            : 'Proxy mode: signer signs for proxy wallet, maker = funderAddress',
         });
 
         this.client = new ClobClient(
@@ -263,8 +264,8 @@ export class PolymarketClient implements IPlatformClient {
       this.log.debug('Note: SDK may log 400 error during createOrDeriveApiKey - this is expected behavior');
       
       // Create temporary client to derive API credentials
-      // Only pass funderAddress for GNOSIS signature type
-      const funderForTempClient = signatureType === 2 ? this.config.funderAddress : undefined;
+      // Pass funderAddress for PROXY (1) and GNOSIS (2) signature types
+      const funderForTempClient = signatureType === 0 ? undefined : this.config.funderAddress;
       const tempClient = new ClobClient(
         this.config.host,
         this.config.chainId,
@@ -329,8 +330,8 @@ export class PolymarketClient implements IPlatformClient {
       });
 
       // Initialize trading client with credentials
-      // Only pass funderAddress for GNOSIS signature type (for EOA, maker = signer)
-      const funderForDerivedClient = signatureType === 2 ? this.config.funderAddress : undefined;
+      // Pass funderAddress for PROXY (1) and GNOSIS (2) signature types
+      const funderForDerivedClient = signatureType === 0 ? undefined : this.config.funderAddress;
       this.client = new ClobClient(
         this.config.host,
         this.config.chainId,

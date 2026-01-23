@@ -115,15 +115,21 @@ export class OrderManager extends EventEmitter {
       throw new Error('Kill switch is active - trading is disabled');
     }
 
+    // Convert order size from shares to USD
+    // order.size is in SHARES, multiply by price to get USD value
+    const orderPrice = Number(order.price) || 0.5;
+    const orderSizeUsd = Number(order.size) * orderPrice;
+
     // Check minimum trade size (platform-specific)
     // Polymarket requires $1 minimum, Kalshi requires $5 minimum
-    const orderSizeUsd = Number(order.size);
     const minTradeSize = order.platform === PLATFORMS.POLYMARKET ? 1.0 : order.platform === PLATFORMS.KALSHI ? 5.0 : 1.0;
-    
+
     if (orderSizeUsd < minTradeSize) {
       const errorMsg = `Order size $${orderSizeUsd.toFixed(2)} below minimum trade size of $${minTradeSize} for ${order.platform}`;
       this.log.warn('Order rejected - below minimum trade size', {
-        orderSize: orderSizeUsd,
+        orderSizeShares: order.size,
+        orderSizeUsd,
+        orderPrice,
         minTradeSize,
         platform: order.platform,
       });
@@ -140,10 +146,12 @@ export class OrderManager extends EventEmitter {
       throw new Error(`Position limit check failed: ${positionLimitCheck.reason}`);
     }
 
-    const exposureCheck = this.exposureTracker.checkExposure(Number(order.size), order.platform);
+    // Check exposure limit (using USD value calculated above)
+    const exposureCheck = this.exposureTracker.checkExposure(orderSizeUsd, order.platform);
     if (!exposureCheck.allowed) {
       this.log.warn('Order rejected by exposure tracker', {
         order,
+        orderSizeUsd,
         reason: exposureCheck.reason,
       });
       throw new Error(`Exposure check failed: ${exposureCheck.reason}`);

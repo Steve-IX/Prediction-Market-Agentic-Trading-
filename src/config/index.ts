@@ -52,8 +52,9 @@ function buildConfigFromEnv(): unknown {
       host: env['POLYMARKET_HOST'] || POLYMARKET_ENDPOINTS.CLOB,
       gammaHost: env['POLYMARKET_GAMMA_HOST'] || POLYMARKET_ENDPOINTS.GAMMA,
       wsHost: env['POLYMARKET_WS_HOST'] || POLYMARKET_ENDPOINTS.WS,
-      // Default to GNOSIS for browser wallet users with proxy wallets
-      signatureType: env['POLYMARKET_SIGNATURE_TYPE'] || 'GNOSIS',
+      // Default to EOA - GNOSIS should only be used for actual Gnosis Safe multisig wallets
+      // Most users should use EOA (direct wallet signing) even if they have a Polymarket proxy
+      signatureType: env['POLYMARKET_SIGNATURE_TYPE'] || 'EOA',
     },
 
     kalshi: {

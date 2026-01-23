@@ -78,12 +78,27 @@ export class PolymarketClient implements IPlatformClient {
 
       // Map signature type
       const signatureType = this.mapSignatureType(this.config.signatureType);
-      
+
+      // Warn about GNOSIS signature type - it's for actual Gnosis Safe multisig wallets only
+      if (this.config.signatureType === 'GNOSIS') {
+        this.log.warn('⚠️ GNOSIS signature type selected - this is for Gnosis Safe multisig wallets only!', {
+          signatureType: this.config.signatureType,
+          signerAddress: this.signer.address,
+          funderAddress: this.config.funderAddress,
+          warning: 'If you are using a regular wallet (MetaMask, etc.) with Polymarket\'s proxy system, use EOA instead.',
+          fix: 'Set POLYMARKET_SIGNATURE_TYPE=EOA in your environment variables',
+          explanation: 'GNOSIS requires Safe-compatible EIP-1271 signatures. Regular EOA wallets cannot sign on behalf of a proxy.',
+        });
+      }
+
       // Log funder address configuration
       if (this.config.funderAddress) {
-        this.log.info('Funder address configured', { 
+        this.log.info('Funder address configured', {
           funderAddress: this.config.funderAddress,
           signatureType: this.config.signatureType,
+          note: this.config.signatureType === 'EOA'
+            ? 'With EOA signature type, funder address is used for balance queries only'
+            : 'With GNOSIS signature type, funder address is the maker address (requires Safe-compatible signatures)',
         });
       } else if (this.config.signatureType === 'GNOSIS') {
         this.log.warn('No funder address configured for GNOSIS signature type', {
@@ -549,12 +564,48 @@ export class PolymarketClient implements IPlatformClient {
         orderType
       );
 
+      // Check if response is an error object (SDK returns errors without throwing)
+      const responseObj = response as unknown as Record<string, unknown>;
+      const orderId = responseObj['id'] || responseObj['orderID'] || '';
+
+      // Check for various error indicators
+      const hasError = responseObj['error'] ||
+                       responseObj['status'] === 400 ||
+                       responseObj['status'] === 401 ||
+                       responseObj['statusText'] === 'Bad Request' ||
+                       responseObj['message']?.toString().toLowerCase().includes('invalid') ||
+                       responseObj['message']?.toString().toLowerCase().includes('signature') ||
+                       !orderId; // Empty order ID means order wasn't created
+
+      if (hasError) {
+        const errorMsg = responseObj['error'] || responseObj['message'] || responseObj['statusText'] || 'Order rejected by CLOB';
+        const errorStatus = responseObj['status'] || 'unknown';
+
+        this.log.error('Order REJECTED by CLOB', {
+          error: errorMsg,
+          status: errorStatus,
+          responseData: JSON.stringify(response),
+          marketId: order.marketId,
+          side: order.side,
+          price: order.price,
+          size: order.size,
+          signatureType: this.config.signatureType,
+          signerAddress: this.signer?.address,
+          funderAddress: this.config.funderAddress,
+          suggestion: String(errorMsg).toLowerCase().includes('signature')
+            ? 'Invalid signature - check POLYMARKET_SIGNATURE_TYPE (should be EOA for regular wallets)'
+            : 'Check order parameters and market availability',
+        });
+
+        throw new Error(`Order rejected by CLOB: ${errorMsg} (status: ${errorStatus})`);
+      }
+
       const durationMs = timer();
       observeApiLatency(this.platform, 'placeOrder', durationMs);
       recordApiRequest(this.platform, 'placeOrder', 'success');
 
-      this.log.info('Order placed', {
-        orderId: response.id,
+      this.log.info('Order placed successfully', {
+        orderId,
         marketId: order.marketId,
         side: order.side,
         price: order.price,

@@ -130,68 +130,84 @@ export class PositionLimitsManager extends EventEmitter {
 
   /**
    * Check per-market position size limit
+   * Note: order.size is in SHARES, but limits are in USD
+   * We must convert shares to USD value using the order price
    */
   private checkMarketPositionLimit(order: OrderRequest): PositionLimitCheckResult {
     const key = this.getPositionKey(order.marketId, order.outcomeId);
     const existingPosition = this.positions.get(key);
 
-    let currentSize = 0;
+    // Get order price for USD conversion (shares * price = USD value)
+    const orderPrice = Number(order.price) || 0.5; // Default to 0.5 if no price
+
+    let currentSizeUsd = 0;
     if (existingPosition) {
-      currentSize = Math.abs(Number(existingPosition.size));
+      // Existing position size is stored as USD value
+      currentSizeUsd = Math.abs(Number(existingPosition.size));
     }
 
-    // Calculate new position size
-    let newSize = currentSize;
+    // Convert order size from shares to USD
+    const orderSizeUsd = Number(order.size) * orderPrice;
+
+    // Calculate new position size in USD
+    let newSizeUsd = currentSizeUsd;
     if (order.side === 'buy') {
-      newSize += Number(order.size);
+      newSizeUsd += orderSizeUsd;
     } else {
-      newSize = Math.max(0, newSize - Number(order.size));
+      newSizeUsd = Math.max(0, newSizeUsd - orderSizeUsd);
     }
 
-    if (newSize > this.config.maxPositionSizeUsd) {
-      const utilization = (newSize / this.config.maxPositionSizeUsd) * 100;
+    if (newSizeUsd > this.config.maxPositionSizeUsd) {
+      const utilization = (newSizeUsd / this.config.maxPositionSizeUsd) * 100;
       this.log.warn('Market position limit exceeded', {
         marketId: order.marketId,
         outcomeId: order.outcomeId,
-        currentSize,
-        orderSize: order.size,
-        newSize,
+        currentSizeUsd,
+        orderSizeShares: order.size,
+        orderSizeUsd,
+        orderPrice,
+        newSizeUsd,
         limit: this.config.maxPositionSizeUsd,
         utilization,
       });
 
       return {
         allowed: false,
-        reason: `Position size would exceed limit: ${newSize.toFixed(2)} > ${this.config.maxPositionSizeUsd}`,
+        reason: `Position size would exceed limit: $${newSizeUsd.toFixed(2)} > $${this.config.maxPositionSizeUsd}`,
         utilization,
       };
     }
 
-    const utilization = (newSize / this.config.maxPositionSizeUsd) * 100;
+    const utilization = (newSizeUsd / this.config.maxPositionSizeUsd) * 100;
     return { allowed: true, utilization };
   }
 
   /**
    * Check total exposure limit
+   * Note: order.size is in SHARES, but limits are in USD
    */
   private checkTotalExposureLimit(order: OrderRequest): PositionLimitCheckResult {
     const currentExposure = this.getTotalExposure();
 
-    // Calculate new exposure
+    // Get order price for USD conversion
+    const orderPrice = Number(order.price) || 0.5;
+    const orderSizeUsd = Number(order.size) * orderPrice;
+
+    // Calculate new exposure in USD
     // For buy orders, exposure increases; for sell orders, it may decrease
     let newExposure = currentExposure;
     if (order.side === 'buy') {
-      newExposure += Number(order.size);
+      newExposure += orderSizeUsd;
     } else {
       // For sell orders, check if we have existing position
       const key = this.getPositionKey(order.marketId, order.outcomeId);
       const existingPosition = this.positions.get(key);
       if (existingPosition && Number(existingPosition.size) > 0) {
         // Reducing position, exposure decreases
-        newExposure = Math.max(0, newExposure - Math.min(Number(order.size), Number(existingPosition.size)));
+        newExposure = Math.max(0, newExposure - Math.min(orderSizeUsd, Number(existingPosition.size)));
       } else {
         // Opening short position, exposure increases
-        newExposure += Number(order.size);
+        newExposure += orderSizeUsd;
       }
     }
 
@@ -199,7 +215,9 @@ export class PositionLimitsManager extends EventEmitter {
       const utilization = (newExposure / this.config.maxTotalExposureUsd) * 100;
       this.log.warn('Total exposure limit exceeded', {
         currentExposure,
-        orderSize: order.size,
+        orderSizeShares: order.size,
+        orderSizeUsd,
+        orderPrice,
         newExposure,
         limit: this.config.maxTotalExposureUsd,
         utilization,
@@ -207,7 +225,7 @@ export class PositionLimitsManager extends EventEmitter {
 
       return {
         allowed: false,
-        reason: `Total exposure would exceed limit: ${newExposure.toFixed(2)} > ${this.config.maxTotalExposureUsd}`,
+        reason: `Total exposure would exceed limit: $${newExposure.toFixed(2)} > $${this.config.maxTotalExposureUsd}`,
         utilization,
       };
     }

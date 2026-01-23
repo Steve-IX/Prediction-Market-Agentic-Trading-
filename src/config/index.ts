@@ -75,9 +75,10 @@ function buildConfigFromEnv(): unknown {
     },
 
     risk: {
-      maxPositionSizeUsd: parseNumber(env['MAX_POSITION_SIZE_USD'], 10000),
-      maxTotalExposureUsd: parseNumber(env['MAX_TOTAL_EXPOSURE_USD'], 50000),
-      maxDailyLossUsd: parseNumber(env['MAX_DAILY_LOSS_USD'], 1000),
+      // Conservative defaults - override via env vars for larger balances
+      maxPositionSizeUsd: parseNumber(env['MAX_POSITION_SIZE_USD'], 5),
+      maxTotalExposureUsd: parseNumber(env['MAX_TOTAL_EXPOSURE_USD'], 10),
+      maxDailyLossUsd: parseNumber(env['MAX_DAILY_LOSS_USD'], 2),
       maxDrawdownPercent: parseNumber(env['MAX_DRAWDOWN_PERCENT'], 10),
       minArbitrageSpreadBps: parseNumber(env['MIN_ARBITRAGE_SPREAD_BPS'], 5),
       crossPlatformSpreadBuffer: parseNumber(env['CROSS_PLATFORM_SPREAD_BUFFER'], 0.15),
@@ -130,9 +131,9 @@ function buildConfigFromEnv(): unknown {
       endgameMinProbability: parseNumber(env['ENDGAME_MIN_PROBABILITY'], 0.90),
       endgameMaxHoursToResolution: parseNumber(env['ENDGAME_MAX_HOURS'], 168),
       endgameMinAnnualizedReturn: parseNumber(env['ENDGAME_MIN_ANNUALIZED_RETURN'], 50),
-      // Position sizing & cooldowns
-      maxPositionSize: parseNumber(env['STRATEGY_MAX_POSITION_SIZE'], 100),
-      minPositionSize: parseNumber(env['STRATEGY_MIN_POSITION_SIZE'], 10),
+      // Position sizing & cooldowns (conservative defaults for small balances)
+      maxPositionSize: parseNumber(env['STRATEGY_MAX_POSITION_SIZE'], 5),
+      minPositionSize: parseNumber(env['STRATEGY_MIN_POSITION_SIZE'], 1),
       signalCooldownMs: parseNumber(env['STRATEGY_SIGNAL_COOLDOWN_MS'], 300000), // 5 minutes (was 30s)
       postTradeCooldownMs: parseNumber(env['POST_TRADE_COOLDOWN_MS'], 600000), // 10 minutes anti-churn
     },

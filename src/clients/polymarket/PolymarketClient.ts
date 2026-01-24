@@ -76,8 +76,24 @@ export class PolymarketClient implements IPlatformClient {
       this.signer = new Wallet(this.config.privateKey);
       this.log.info('Wallet initialized', { address: this.signer.address });
 
+      // Determine signature type
+      // If funderAddress is provided and signature type is EOA, use PROXY instead
+      // This is because API credentials are typically tied to the proxy wallet (funderAddress)
+      // and EOA signatures can't sign for a different maker address
+      let effectiveSignatureType = this.config.signatureType;
+      if (this.config.funderAddress && this.config.signatureType === 'EOA') {
+        this.log.warn('Funder address provided with EOA signature type - switching to PROXY mode', {
+          originalSignatureType: this.config.signatureType,
+          funderAddress: this.config.funderAddress,
+          signerAddress: this.signer.address,
+          reason: 'API credentials are typically tied to proxy wallet, and EOA cannot sign for different maker address',
+          note: 'If you want to use EOA mode, regenerate API credentials for the EOA wallet and do not provide funderAddress',
+        });
+        effectiveSignatureType = 'PROXY';
+      }
+
       // Map signature type
-      const signatureType = this.mapSignatureType(this.config.signatureType);
+      const signatureType = this.mapSignatureType(effectiveSignatureType);
 
       // Warn about GNOSIS signature type - it's for actual Gnosis Safe multisig wallets only
       if (this.config.signatureType === 'GNOSIS') {
@@ -95,8 +111,9 @@ export class PolymarketClient implements IPlatformClient {
       if (this.config.funderAddress) {
         this.log.info('Funder address configured', {
           funderAddress: this.config.funderAddress,
-          signatureType: this.config.signatureType,
-          note: this.config.signatureType === 'EOA'
+          originalSignatureType: this.config.signatureType,
+          effectiveSignatureType: effectiveSignatureType,
+          note: effectiveSignatureType === 'EOA'
             ? 'With EOA signature type, funder address is used for balance queries only. Maker = signer (EOA wallet).'
             : 'With PROXY/GNOSIS signature type, funder address sets the maker address (proxy wallet)',
         });
@@ -128,9 +145,8 @@ export class PolymarketClient implements IPlatformClient {
         };
 
         // Initialize trading client with provided credentials
-        // IMPORTANT: For EOA (type 0), do NOT pass funderAddress as maker - EOA can only sign for itself
         // For PROXY (type 1) and GNOSIS (type 2), pass funderAddress to set maker = proxy wallet
-        // The funderAddress is still used for balance queries in all cases
+        // EOA (type 0) should not have funderAddress (handled above by switching to PROXY)
         const funderForClient = signatureType === 0 ? undefined : this.config.funderAddress;
 
         this.log.info('Initializing ClobClient', {
@@ -265,8 +281,8 @@ export class PolymarketClient implements IPlatformClient {
       this.log.debug('Note: SDK may log 400 error during createOrDeriveApiKey - this is expected behavior');
       
       // Create temporary client to derive API credentials
-      // For EOA (type 0), do NOT pass funderAddress - EOA can only sign for itself (maker = signer)
       // For PROXY (type 1) and GNOSIS (type 2), pass funderAddress to set maker = proxy wallet
+      // EOA (type 0) should not have funderAddress (handled above by switching to PROXY)
       const funderForTempClient = signatureType === 0 ? undefined : this.config.funderAddress;
       const tempClient = new ClobClient(
         this.config.host,
@@ -332,8 +348,8 @@ export class PolymarketClient implements IPlatformClient {
       });
 
       // Initialize trading client with credentials
-      // For EOA (type 0), do NOT pass funderAddress - EOA can only sign for itself (maker = signer)
       // For PROXY (type 1) and GNOSIS (type 2), pass funderAddress to set maker = proxy wallet
+      // EOA (type 0) should not have funderAddress (handled above by switching to PROXY)
       const funderForDerivedClient = signatureType === 0 ? undefined : this.config.funderAddress;
       this.client = new ClobClient(
         this.config.host,

@@ -21,6 +21,20 @@ export interface TradingSignal {
   strategy: string;
   createdAt: Date;
   expiresAt: Date;
+  metadata?: {
+    batchExecution?: boolean;
+    batchOrders?: Array<{
+      outcomeId: string;
+      outcomeName: string;
+      side: 'BUY' | 'SELL';
+      price: number;
+      size: number;
+    }>;
+    totalCost?: number;
+    expectedProfit?: number;
+    sumOfAsks?: number;
+    [key: string]: unknown;
+  };
 }
 
 /**

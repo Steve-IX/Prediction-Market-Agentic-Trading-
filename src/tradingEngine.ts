@@ -202,6 +202,13 @@ export class TradingEngine extends EventEmitter {
         maxPositionSize: this.appConfig.strategies.maxPositionSize,
         minPositionSize: this.appConfig.strategies.minPositionSize,
       },
+      volatilityCaptureConfig: {
+        minDropPercent: this.appConfig.strategies.volatilityCaptureMinDropPercent ?? 10.0,
+        maxDropPercent: this.appConfig.strategies.volatilityCaptureMaxDropPercent ?? 50.0,
+        monitoringWindowMinutes: this.appConfig.strategies.volatilityCaptureWindowMinutes ?? 2,
+        maxPositionSize: this.appConfig.strategies.maxPositionSize,
+        minPositionSize: this.appConfig.strategies.minPositionSize,
+      },
     });
     this.signalExecutor = new SignalExecutor(this.orderManager);
 
@@ -209,9 +216,10 @@ export class TradingEngine extends EventEmitter {
     this.killSwitch = new KillSwitch(this.orderManager);
 
     // Create price poller for active price data
+    // Now polls ALL active markets (not just top 200)
     this.pricePoller = new PricePoller({
-      intervalMs: 10000, // Poll every 10 seconds
-      maxMarkets: 200, // Track top 200 markets by volume
+      intervalMs: 30000, // Poll every 30 seconds (all markets)
+      maxMarkets: 10000, // Track ALL active markets
     });
 
     this.setupEventListeners();
@@ -772,13 +780,14 @@ export class TradingEngine extends EventEmitter {
     this.log.debug('Refreshing markets...');
 
     try {
-      // Only fetch from connected platforms
+      // Fetch ALL active markets (not just 100)
+      // Prediction strategies work on all markets, not just top volume
       const polymarketPromise = this.polymarketClient.isConnected()
-        ? this.polymarketClient.getMarkets({ activeOnly: true, limit: 100 })
+        ? this.polymarketClient.getMarkets({ activeOnly: true, limit: 10000 }) // Increased from 100
         : Promise.resolve([]);
       
       const kalshiPromise = this.kalshiClient.isConnected()
-        ? this.kalshiClient.getMarkets({ activeOnly: true, limit: 100 })
+        ? this.kalshiClient.getMarkets({ activeOnly: true, limit: 10000 }) // Increased from 100
         : Promise.resolve([]);
 
       const [polymarketResult, kalshiResult] = await Promise.allSettled([
@@ -803,7 +812,7 @@ export class TradingEngine extends EventEmitter {
       this.markets.set(PLATFORMS.POLYMARKET, polymarketMarkets);
       this.markets.set(PLATFORMS.KALSHI, kalshiMarkets);
 
-      // Update price poller with new markets (top 200 by volume)
+      // Update price poller with ALL markets (not just top 200)
       const allMarkets = [...polymarketMarkets, ...kalshiMarkets];
       this.pricePoller.updateTrackedMarkets(allMarkets);
 

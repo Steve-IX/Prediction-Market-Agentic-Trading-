@@ -31,7 +31,7 @@ export interface SignalExecutorConfig {
 const DEFAULT_CONFIG: SignalExecutorConfig = {
   maxSlippage: 0.02,
   executionTimeoutMs: 5000,
-  minConfidence: 0.5,
+  minConfidence: 0.3, // Lowered from 0.5 for prediction markets
 };
 
 /**
@@ -79,6 +79,11 @@ export class SignalExecutor extends EventEmitter {
     this.pendingExecutions.add(signal.id);
 
     try {
+      // Check if this is a batch execution signal (e.g., probability sum arbitrage)
+      if (signal.metadata?.batchExecution && signal.metadata?.batchOrders) {
+        return await this.executeBatchSignal(signal, startTime);
+      }
+
       this.log.info('Executing signal', {
         id: signal.id,
         strategy: signal.strategy,
@@ -134,6 +139,95 @@ export class SignalExecutor extends EventEmitter {
     } finally {
       this.pendingExecutions.delete(signal.id);
     }
+  }
+
+  /**
+   * Execute a batch signal (e.g., probability sum arbitrage buying YES + NO)
+   */
+  private async executeBatchSignal(
+    signal: TradingSignal,
+    startTime: number
+  ): Promise<SignalExecutionResult> {
+    const batchOrders = signal.metadata!.batchOrders!;
+    
+    this.log.info('Executing batch signal', {
+      id: signal.id,
+      strategy: signal.strategy,
+      market: signal.market.title,
+      ordersCount: batchOrders.length,
+      totalCost: signal.metadata!.totalCost,
+      expectedProfit: signal.metadata!.expectedProfit,
+    });
+
+    const orders = [];
+    let totalFilledSize = 0;
+    let totalCost = 0;
+    let allSuccessful = true;
+
+    // Execute all orders in the batch (as fast as possible)
+    for (const batchOrder of batchOrders) {
+      try {
+        // Calculate limit price with slippage buffer
+        let limitPrice = batchOrder.price;
+        if (batchOrder.side === 'BUY') {
+          limitPrice = Math.min(0.99, batchOrder.price * (1 + this.config.maxSlippage));
+        } else {
+          limitPrice = Math.max(0.01, batchOrder.price * (1 - this.config.maxSlippage));
+        }
+
+        const order = await this.orderManager.placeOrder({
+          platform: signal.market.platform,
+          marketId: signal.marketId,
+          outcomeId: batchOrder.outcomeId,
+          side: batchOrder.side === 'BUY' ? ORDER_SIDES.BUY : ORDER_SIDES.SELL,
+          type: ORDER_TYPES.GTC,
+          price: limitPrice,
+          size: batchOrder.size,
+        });
+
+        orders.push(order);
+        totalFilledSize += order.filledSize;
+        totalCost += order.filledSize * (order.avgFillPrice || batchOrder.price);
+      } catch (error) {
+        this.log.error('Batch order failed', {
+          outcomeId: batchOrder.outcomeId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        allSuccessful = false;
+      }
+    }
+
+    const executionTimeMs = Date.now() - startTime;
+
+    if (!allSuccessful || orders.length === 0) {
+      return this.createFailedResult(
+        signal,
+        `Batch execution incomplete: ${orders.length}/${batchOrders.length} orders succeeded`,
+        startTime
+      );
+    }
+
+    const result: SignalExecutionResult = {
+      signal,
+      success: true,
+      orderId: orders[0]!.id, // Primary order ID
+      filledSize: totalFilledSize,
+      filledPrice: totalCost / totalFilledSize, // Average fill price
+      fee: 0, // Fee calculated separately
+      profit: 0, // Will be calculated when position closes
+      executionTimeMs,
+    };
+
+    this.log.info('Batch signal executed successfully', {
+      id: signal.id,
+      ordersExecuted: orders.length,
+      totalFilledSize,
+      totalCost: totalCost.toFixed(2),
+      executionTimeMs,
+    });
+
+    this.emit('executed', result);
+    return result;
   }
 
   /**

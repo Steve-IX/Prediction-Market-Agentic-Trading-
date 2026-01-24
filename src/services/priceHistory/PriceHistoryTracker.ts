@@ -122,7 +122,7 @@ export class PriceHistoryTracker extends EventEmitter {
 
     // Filter to window
     const windowPoints = points.filter((p) => p.timestamp >= windowStart);
-    if (windowPoints.length < 5) return null;
+    if (windowPoints.length < 3) return null; // Reduced from 5 to 3 for faster signal generation
 
     const prices = windowPoints.map((p) => p.price);
     const volumes = windowPoints.map((p) => p.volume ?? 0);

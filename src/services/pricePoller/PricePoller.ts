@@ -11,8 +11,8 @@ export interface PricePollerConfig {
 }
 
 const DEFAULT_CONFIG: PricePollerConfig = {
-  intervalMs: 10000, // 10 seconds
-  maxMarkets: 200,
+  intervalMs: 30000, // 30 seconds (poll all markets less frequently)
+  maxMarkets: 10000, // Poll ALL active markets (increased from 200)
 };
 
 /**
@@ -92,25 +92,27 @@ export class PricePoller extends EventEmitter {
 
   /**
    * Update tracked markets
+   * Now tracks ALL active markets (not just top N by volume)
    */
   updateTrackedMarkets(markets: NormalizedMarket[]): void {
     // Clear existing
     this.trackedMarkets.clear();
 
-    // Take top N markets by volume (most liquid)
-    const sorted = markets
+    // Track ALL active binary markets (prediction strategies work on all markets)
+    const activeMarkets = markets
       .filter((m) => m.isActive && m.outcomes.length === 2)
-      .sort((a, b) => b.volume24h - a.volume24h)
-      .slice(0, this.config.maxMarkets);
+      .slice(0, this.config.maxMarkets); // Limit only if exceeds maxMarkets
 
     // Store in map
-    for (const market of sorted) {
+    for (const market of activeMarkets) {
       this.trackedMarkets.set(market.externalId, market);
     }
 
     this.log.info('Tracked markets updated', {
       totalAvailable: markets.length,
+      activeBinaryMarkets: activeMarkets.length,
       nowTracking: this.trackedMarkets.size,
+      note: 'Tracking all active markets for prediction strategies',
     });
   }
 

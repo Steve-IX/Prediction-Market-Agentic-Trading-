@@ -127,16 +127,20 @@ function buildConfigFromEnv(): unknown {
       spreadHunterMaxSpreadPercent: parseNumber(env['SPREAD_HUNTER_MAX_SPREAD_PERCENT'], 15.0),
       spreadHunterMinBidSize: parseNumber(env['SPREAD_HUNTER_MIN_BID_SIZE'], 10),
       spreadHunterMinAskSize: parseNumber(env['SPREAD_HUNTER_MIN_ASK_SIZE'], 10),
-      // Prediction market-specific strategies
-      probabilitySumMinMispricingPercent: parseNumber(env['PROBABILITY_SUM_MIN_MISPRICING'], 0.5),
-      endgameMinProbability: parseNumber(env['ENDGAME_MIN_PROBABILITY'], 0.90),
-      endgameMaxHoursToResolution: parseNumber(env['ENDGAME_MAX_HOURS'], 168),
-      endgameMinAnnualizedReturn: parseNumber(env['ENDGAME_MIN_ANNUALIZED_RETURN'], 50),
-      // Position sizing & cooldowns (conservative defaults for small balances)
-      maxPositionSize: parseNumber(env['STRATEGY_MAX_POSITION_SIZE'], 5),
-      minPositionSize: parseNumber(env['STRATEGY_MIN_POSITION_SIZE'], 1),
-      signalCooldownMs: parseNumber(env['STRATEGY_SIGNAL_COOLDOWN_MS'], 300000), // 5 minutes (was 30s)
-      postTradeCooldownMs: parseNumber(env['POST_TRADE_COOLDOWN_MS'], 600000), // 10 minutes anti-churn
+      // Prediction market-specific strategies - updated defaults
+      probabilitySumMinMispricingPercent: parseNumber(env['PROBABILITY_SUM_MIN_MISPRICING'], 0.3), // Was 0.5
+      endgameMinProbability: parseNumber(env['ENDGAME_MIN_PROBABILITY'], 0.70), // Was 0.90
+      endgameMaxHoursToResolution: parseNumber(env['ENDGAME_MAX_HOURS'], 720), // 30 days (was 168 = 1 week)
+      endgameMinAnnualizedReturn: parseNumber(env['ENDGAME_MIN_ANNUALIZED_RETURN'], 10), // 10% (was 50%)
+      // Volatility capture strategy
+      volatilityCaptureMinDropPercent: parseNumber(env['VOLATILITY_CAPTURE_MIN_DROP_PERCENT'], 10.0),
+      volatilityCaptureMaxDropPercent: parseNumber(env['VOLATILITY_CAPTURE_MAX_DROP_PERCENT'], 50.0),
+      volatilityCaptureWindowMinutes: parseNumber(env['VOLATILITY_CAPTURE_WINDOW_MINUTES'], 2),
+      // Position sizing & cooldowns - updated defaults
+      maxPositionSize: parseNumber(env['STRATEGY_MAX_POSITION_SIZE'], 100), // Increased from 5
+      minPositionSize: parseNumber(env['STRATEGY_MIN_POSITION_SIZE'], 10), // Increased from 1
+      signalCooldownMs: parseNumber(env['STRATEGY_SIGNAL_COOLDOWN_MS'], 120000), // 2 minutes (reduced from 5 min)
+      postTradeCooldownMs: parseNumber(env['POST_TRADE_COOLDOWN_MS'], 300000), // 5 minutes (reduced from 10 min)
     },
 
     anthropic: {

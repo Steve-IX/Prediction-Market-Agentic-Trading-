@@ -5,6 +5,7 @@ import { MomentumStrategy, type TradingSignal } from './momentum/MomentumStrateg
 import { MeanReversionStrategy } from './momentum/MeanReversionStrategy.js';
 import { OrderbookImbalanceStrategy } from './momentum/OrderbookImbalanceStrategy.js';
 import { SpreadHunterStrategy } from './momentum/SpreadHunterStrategy.js';
+import { VolatilityCaptureStrategy } from './momentum/VolatilityCaptureStrategy.js';
 import { ProbabilitySumStrategy } from './prediction/ProbabilitySumStrategy.js';
 import { EndgameStrategy } from './prediction/EndgameStrategy.js';
 import { OUTCOMES } from '../config/constants.js';
@@ -18,6 +19,7 @@ export interface StrategyManagerConfig {
   enableMeanReversion: boolean;
   enableOrderbookImbalance: boolean;
   enableSpreadHunter: boolean; // Targets illiquid markets with wide spreads
+  enableVolatilityCapture: boolean; // Captures rapid price movements (10%+ drops)
   enableProbabilitySum: boolean; // Prediction market arbitrage (YES+NO != $1)
   enableEndgame: boolean; // High probability near resolution
   maxConcurrentSignals: number;
@@ -36,19 +38,26 @@ export interface StrategyManagerConfig {
     maxPositionSize?: number;
     minPositionSize?: number;
   };
-  orderbookImbalanceConfig?: {
-    minImbalanceRatio?: number;
-    maxPositionSize?: number;
-    minPositionSize?: number;
-  };
-  spreadHunterConfig?: {
-    minSpreadPercent?: number;
-    maxSpreadPercent?: number;
-    minBidSize?: number;
-    minAskSize?: number;
-    maxPositionSize?: number;
-    minPositionSize?: number;
-  };
+      orderbookImbalanceConfig?: {
+        minImbalanceRatio?: number;
+        maxPositionSize?: number;
+        minPositionSize?: number;
+      };
+      spreadHunterConfig?: {
+        minSpreadPercent?: number;
+        maxSpreadPercent?: number;
+        minBidSize?: number;
+        minAskSize?: number;
+        maxPositionSize?: number;
+        minPositionSize?: number;
+      };
+      volatilityCaptureConfig?: {
+        minDropPercent?: number;
+        maxDropPercent?: number;
+        monitoringWindowMinutes?: number;
+        maxPositionSize?: number;
+        minPositionSize?: number;
+      };
   probabilitySumConfig?: {
     minMispricingPercent?: number;
     maxPositionSize?: number;
@@ -68,11 +77,12 @@ const DEFAULT_CONFIG: StrategyManagerConfig = {
   enableMeanReversion: true,
   enableOrderbookImbalance: true,
   enableSpreadHunter: true, // Enabled by default - targets illiquid markets
+  enableVolatilityCapture: false, // Disabled by default - requires careful monitoring
   enableProbabilitySum: true, // Enabled by default - most reliable strategy
   enableEndgame: true, // Enabled by default
   maxConcurrentSignals: 3,
-  signalCooldownMs: 300000, // 5 minutes between signals on same market
-  postTradeCooldownMs: 600000, // 10 minutes after trade execution (anti-churn)
+  signalCooldownMs: 120000, // 2 minutes between signals on same market (reduced from 5 min)
+  postTradeCooldownMs: 300000, // 5 minutes after trade execution (reduced from 10 min)
 };
 
 /**
@@ -91,6 +101,7 @@ export class StrategyManager extends EventEmitter {
   private meanReversionStrategy: MeanReversionStrategy;
   private orderbookImbalanceStrategy: OrderbookImbalanceStrategy;
   private spreadHunterStrategy: SpreadHunterStrategy;
+  private volatilityCaptureStrategy: VolatilityCaptureStrategy;
 
   // Prediction Market-Specific Strategies (don't need price history)
   private probabilitySumStrategy: ProbabilitySumStrategy;
@@ -110,6 +121,7 @@ export class StrategyManager extends EventEmitter {
     this.meanReversionStrategy = new MeanReversionStrategy(this.config.meanReversionConfig);
     this.orderbookImbalanceStrategy = new OrderbookImbalanceStrategy(this.config.orderbookImbalanceConfig);
     this.spreadHunterStrategy = new SpreadHunterStrategy(this.config.spreadHunterConfig);
+    this.volatilityCaptureStrategy = new VolatilityCaptureStrategy(this.config.volatilityCaptureConfig);
     
     // Prediction market-specific strategies (don't need price history)
     this.probabilitySumStrategy = new ProbabilitySumStrategy(this.config.probabilitySumConfig);
@@ -134,6 +146,7 @@ export class StrategyManager extends EventEmitter {
 
   /**
    * Analyze a market for trading signals
+   * Prioritizes prediction strategies (work on all markets) over technical strategies (need price history)
    */
   analyzeMarket(market: NormalizedMarket, orderbook?: OrderBook): TradingSignal[] {
     const signals: TradingSignal[] = [];
@@ -143,9 +156,10 @@ export class StrategyManager extends EventEmitter {
       return signals;
     }
 
-    // === PREDICTION MARKET-SPECIFIC STRATEGIES (highest priority, don't need price history) ===
+    // === PREDICTION MARKET-SPECIFIC STRATEGIES (highest priority, work on ALL markets) ===
+    // These don't require price history, so run them first on all markets
     
-    // Run probability sum strategy (YES+NO != $1 arbitrage)
+    // Run probability sum strategy (YES+NO != $1 arbitrage) - MOST RELIABLE
     if (this.config.enableProbabilitySum) {
       const signal = this.probabilitySumStrategy.analyze(market);
       if (signal) {
@@ -157,7 +171,7 @@ export class StrategyManager extends EventEmitter {
       }
     }
 
-    // Run endgame strategy (high probability near resolution)
+    // Run endgame strategy (high probability near resolution) - SECOND MOST RELIABLE
     if (this.config.enableEndgame) {
       const signal = this.endgameStrategy.analyze(market);
       if (signal) {
@@ -169,13 +183,28 @@ export class StrategyManager extends EventEmitter {
       }
     }
 
+    // If we found prediction strategy signals, return early (prioritize them)
+    if (signals.length > 0) {
+      const filteredSignals = this.filterSignals(signals);
+      if (filteredSignals.length > 0) {
+        this.setCooldown(market.externalId);
+      }
+      return filteredSignals;
+    }
+
     // === TECHNICAL ANALYSIS STRATEGIES (need price history) ===
+    // Only run these if we have price history (faster - skip markets without data)
     
     // Get price stats
     const stats = this.priceTracker.getStats(market.externalId, 60);
+    
+    // Skip technical strategies if no price history
+    if (!stats) {
+      return signals; // No price history, can't run technical strategies
+    }
 
     // Run momentum strategy
-    if (this.config.enableMomentum && stats) {
+    if (this.config.enableMomentum) {
       const signal = this.momentumStrategy.analyze(market, stats);
       if (signal) {
         signals.push(signal);
@@ -183,7 +212,7 @@ export class StrategyManager extends EventEmitter {
     }
 
     // Run mean reversion strategy
-    if (this.config.enableMeanReversion && stats) {
+    if (this.config.enableMeanReversion) {
       const signal = this.meanReversionStrategy.analyze(market, stats);
       if (signal) {
         signals.push(signal);
@@ -211,6 +240,14 @@ export class StrategyManager extends EventEmitter {
       }
     }
 
+    // Run volatility capture strategy (rapid price movements)
+    if (this.config.enableVolatilityCapture && stats) {
+      const signal = this.volatilityCaptureStrategy.analyze(market, stats);
+      if (signal) {
+        signals.push(signal);
+      }
+    }
+
     // Filter and prioritize signals
     const filteredSignals = this.filterSignals(signals);
 
@@ -224,6 +261,7 @@ export class StrategyManager extends EventEmitter {
 
   /**
    * Scan multiple markets
+   * Optimized: Prioritizes prediction strategies (scan ALL markets) over technical strategies
    */
   scanMarkets(markets: NormalizedMarket[], orderbooks?: Map<string, OrderBook>): TradingSignal[] {
     const allSignals: TradingSignal[] = [];
@@ -235,6 +273,11 @@ export class StrategyManager extends EventEmitter {
       return yes?.bestAsk && no?.bestAsk && yes.bestAsk > 0 && no.bestAsk > 0;
     });
 
+    // Get markets with price history (for technical strategies)
+    const marketsWithPriceHistory = binaryMarkets.filter(m => 
+      this.priceTracker.getStats(m.externalId, 60) !== null
+    );
+
     // Log at info level periodically (every 5th scan) to avoid spam
     if (Math.random() < 0.2) {
       this.log.info('Scanning markets for signals', {
@@ -242,12 +285,16 @@ export class StrategyManager extends EventEmitter {
         activeMarkets: activeMarkets.length,
         binaryMarkets: binaryMarkets.length,
         marketsWithPrices: marketsWithPrices.length,
+        marketsWithPriceHistory: marketsWithPriceHistory.length,
         orderbooksAvailable: orderbooks?.size || 0,
+        note: 'Prediction strategies scan ALL markets, technical strategies only scan markets with price history',
       });
     }
 
-    for (const market of activeMarkets) {
-      // Try to get orderbook for first outcome (for orderbook imbalance strategy)
+    // Scan ALL binary markets for prediction strategies (Probability Sum, Endgame)
+    // These work on all markets and don't need price history
+    for (const market of binaryMarkets) {
+      // Only get orderbook if we have price history (for technical strategies)
       const firstOutcomeId = market.outcomes[0]?.externalId;
       const orderbook = firstOutcomeId ? orderbooks?.get(firstOutcomeId) : undefined;
       const signals = this.analyzeMarket(market, orderbook);
@@ -341,6 +388,7 @@ export class StrategyManager extends EventEmitter {
       ...this.momentumStrategy.getActiveSignals(),
       ...this.meanReversionStrategy.getActiveSignals(),
       ...this.orderbookImbalanceStrategy.getActiveSignals(),
+      ...this.volatilityCaptureStrategy.getActiveSignals(),
     ];
 
     if (allSignals.length === 0) return null;
@@ -360,6 +408,7 @@ export class StrategyManager extends EventEmitter {
     this.momentumStrategy.clearSignal(signal.marketId);
     this.meanReversionStrategy.clearSignal(signal.marketId);
     this.orderbookImbalanceStrategy.clearSignal(signal.marketId);
+    this.volatilityCaptureStrategy.clearSignal(signal.marketId);
     // Set post-trade cooldown to prevent churning (buy/sell same market repeatedly)
     this.setCooldown(signal.marketId, this.config.postTradeCooldownMs);
     this.log.info('Post-trade cooldown set', {
@@ -434,6 +483,10 @@ export class StrategyManager extends EventEmitter {
     this.orderbookImbalanceStrategy.on('signal', (signal) => {
       this.emit('signal', signal);
     });
+
+    this.volatilityCaptureStrategy.on('signal', (signal) => {
+      this.emit('signal', signal);
+    });
   }
 
   private filterSignals(signals: TradingSignal[]): TradingSignal[] {
@@ -467,6 +520,7 @@ export class StrategyManager extends EventEmitter {
     this.momentumStrategy.clearExpiredSignals();
     this.meanReversionStrategy.clearExpiredSignals();
     this.orderbookImbalanceStrategy.clearExpiredSignals();
+    this.volatilityCaptureStrategy.clearExpiredSignals();
 
     // Clean expired cooldowns
     const now = new Date();

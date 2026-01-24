@@ -23,10 +23,10 @@ export interface ProbabilitySumConfig {
 }
 
 const DEFAULT_CONFIG: ProbabilitySumConfig = {
-  minMispricingPercent: 0.5, // 0.5% mispricing minimum
+  minMispricingPercent: 0.3, // 0.3% mispricing minimum (lowered for prediction markets)
   maxPositionSize: 100,
   minPositionSize: 10,
-  platformFeePercent: 1.0, // Account for fees
+  platformFeePercent: 1.0, // Fees are on execution, not upfront
 };
 
 /**
@@ -105,25 +105,45 @@ export class ProbabilitySumStrategy extends EventEmitter {
       timestamp: new Date()
     });
 
-    // Calculate profit after fees
-    const profitAfterFees = (1.0 - sumOfAsks) * 100 - this.config.platformFeePercent;
+    // Calculate profit percentage (fees are on execution, not upfront)
+    // If sum = 0.997, profit = (1.0 - 0.997) / 0.997 = 0.3%
+    const profitPercent = ((1.0 - sumOfAsks) / sumOfAsks) * 100;
+    const minProfitPercent = this.config.minMispricingPercent;
 
-    // Log if we find a close opportunity (within 2% of threshold) for diagnostics
-    if (sumOfAsks < 1.02 && sumOfAsks >= 1.0) {
-      this.log.debug('Close probability sum opportunity', {
+    // Log diagnostics for why strategy doesn't trigger
+    if (sumOfAsks >= 1.0) {
+      // Sum >= 1.0, no arbitrage opportunity
+      if (Math.random() < 0.01) { // Log 1% of non-opportunities for diagnostics
+        this.log.debug('ProbabilitySum: No opportunity (sum >= 1.0)', {
+          market: market.title.substring(0, 40),
+          sumOfAsks: sumOfAsks.toFixed(4),
+          yesAsk: yesAsk.toFixed(4),
+          noAsk: noAsk.toFixed(4),
+        });
+      }
+      return null;
+    }
+
+    // Log if we find a close opportunity (within 0.5% of threshold) for diagnostics
+    if (sumOfAsks < 1.0 && profitPercent < minProfitPercent) {
+      this.log.debug('ProbabilitySum: Close but below threshold', {
         market: market.title.substring(0, 40),
         sumOfAsks: sumOfAsks.toFixed(4),
         yesAsk: yesAsk.toFixed(4),
         noAsk: noAsk.toFixed(4),
-        profitAfterFees: profitAfterFees.toFixed(2),
-        threshold: '1.0',
+        profitPercent: profitPercent.toFixed(2),
+        threshold: minProfitPercent.toFixed(2),
+        reason: `Profit ${profitPercent.toFixed(2)}% < threshold ${minProfitPercent.toFixed(2)}%`,
       });
+      return null;
     }
 
-    // Check for arbitrage opportunity: sum < $1.00 (minus fees)
-    if (sumOfAsks < 1.0 && profitAfterFees > 0) {
+    // Check for arbitrage opportunity: sum < $1.00 and profit > threshold
+    // Note: Fees (~1%) are deducted at execution, so we need profit > fees to be profitable
+    if (sumOfAsks < 1.0 && profitPercent >= minProfitPercent) {
       // We can buy both YES and NO for less than $1, guaranteed $1 at resolution
-      return this.createArbitrageSignal(market, yesOutcome, noOutcome, sumOfAsks, profitAfterFees);
+      // Create signals for BOTH outcomes (true arbitrage requires both)
+      return this.createArbitrageSignal(market, yesOutcome, noOutcome, sumOfAsks, profitPercent);
     }
 
     return null;
@@ -187,7 +207,8 @@ export class ProbabilitySumStrategy extends EventEmitter {
       if (!yesAsk || !noAsk) continue;
 
       const sum = yesAsk + noAsk;
-      const profitPercent = (1.0 - sum) * 100 - this.config.platformFeePercent;
+      // Calculate profit percentage (fees are on execution, not upfront)
+      const profitPercent = ((1.0 - sum) / sum) * 100;
 
       opportunities.push({ market, sum, profitPercent });
     }
@@ -199,6 +220,7 @@ export class ProbabilitySumStrategy extends EventEmitter {
 
   /**
    * Create an arbitrage signal for buying both YES and NO
+   * Returns a signal with metadata indicating it needs batch execution
    */
   private createArbitrageSignal(
     market: NormalizedMarket,
@@ -207,38 +229,72 @@ export class ProbabilitySumStrategy extends EventEmitter {
     sumOfAsks: number,
     profitPercent: number
   ): TradingSignal {
-    // For arbitrage, we buy the cheaper outcome
-    const buyYes = yesOutcome.bestAsk <= noOutcome.bestAsk;
-    const outcome = buyYes ? yesOutcome : noOutcome;
-    
-    const confidence = Math.min(1.0, 0.5 + profitPercent / 10); // Higher profit = higher confidence
-    const size = this.config.minPositionSize + 
+    // For true arbitrage, we need to buy BOTH YES and NO
+    // Calculate position size: split investment between both outcomes
+    const confidence = Math.min(1.0, 0.7 + profitPercent / 20); // Higher profit = higher confidence
+    const totalSize = this.config.minPositionSize + 
       (this.config.maxPositionSize - this.config.minPositionSize) * confidence;
-
+    
+    // Split position: buy proportional to prices (more of the cheaper one)
+    // But ensure we get at least $1 worth of each outcome at resolution
+    const yesSize = totalSize * (yesOutcome.bestAsk / sumOfAsks);
+    const noSize = totalSize * (noOutcome.bestAsk / sumOfAsks);
+    
+    // Calculate shares needed for each outcome
+    const yesShares = yesSize / yesOutcome.bestAsk;
+    const noShares = noSize / noOutcome.bestAsk;
+    
+    // Use YES outcome as primary signal, but include metadata for batch execution
     const signal: TradingSignal = {
-      id: `probsum:${market.externalId}:BUY:${Date.now()}`,
+      id: `probsum:${market.externalId}:BATCH:${Date.now()}`,
       marketId: market.externalId,
       market,
-      outcomeId: outcome.externalId,
-      outcomeName: outcome.name,
+      outcomeId: yesOutcome.externalId, // Primary outcome ID
+      outcomeName: yesOutcome.name,
       side: 'BUY',
-      price: outcome.bestAsk,
-      size: size / outcome.bestAsk,
+      price: yesOutcome.bestAsk,
+      size: yesShares, // Size for YES outcome
       confidence,
-      reason: `Probability sum arbitrage: YES($${yesOutcome.bestAsk.toFixed(3)}) + NO($${noOutcome.bestAsk.toFixed(3)}) = $${sumOfAsks.toFixed(3)} < $1.00. Est. profit: ${profitPercent.toFixed(2)}% after fees`,
+      reason: `Probability sum arbitrage: YES($${yesOutcome.bestAsk.toFixed(3)}) + NO($${noOutcome.bestAsk.toFixed(3)}) = $${sumOfAsks.toFixed(3)} < $1.00. Est. profit: ${profitPercent.toFixed(2)}% (requires buying BOTH outcomes)`,
       strategy: 'probability_sum',
       createdAt: new Date(),
       expiresAt: new Date(Date.now() + 30000), // 30 second validity
+      // Add metadata for batch execution (will be checked by SignalExecutor)
+      metadata: {
+        batchExecution: true,
+        batchOrders: [
+          {
+            outcomeId: yesOutcome.externalId,
+            outcomeName: yesOutcome.name,
+            side: 'BUY',
+            price: yesOutcome.bestAsk,
+            size: yesShares,
+          },
+          {
+            outcomeId: noOutcome.externalId,
+            outcomeName: noOutcome.name,
+            side: 'BUY',
+            price: noOutcome.bestAsk,
+            size: noShares,
+          },
+        ],
+        totalCost: totalSize,
+        expectedProfit: profitPercent,
+        sumOfAsks,
+      },
     };
 
     this.activeSignals.set(market.externalId, signal);
     this.emit('signal', signal);
 
-    this.log.info('Probability sum arbitrage signal', {
+    this.log.info('Probability sum arbitrage signal (BATCH)', {
       market: market.title.substring(0, 50),
       sum: sumOfAsks.toFixed(4),
       profitPercent: profitPercent.toFixed(2),
       confidence: confidence.toFixed(2),
+      yesSize: yesSize.toFixed(2),
+      noSize: noSize.toFixed(2),
+      totalSize: totalSize.toFixed(2),
     });
 
     return signal;

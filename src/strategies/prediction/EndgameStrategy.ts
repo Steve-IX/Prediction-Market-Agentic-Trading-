@@ -28,13 +28,13 @@ export interface EndgameConfig {
 }
 
 const DEFAULT_CONFIG: EndgameConfig = {
-  minProbability: 0.75, // 75% certain (lowered from 90%)
+  minProbability: 0.70, // 70% certain (lowered from 75%)
   maxProbability: 0.98, // Not 99%+ (might be stale data)
-  maxHoursToResolution: 336, // 2 weeks (increased from 1 week)
-  minHoursToResolution: 0.5, // At least 30 min to resolution (lowered)
+  maxHoursToResolution: 720, // 30 days (increased from 2 weeks)
+  minHoursToResolution: 0.5, // At least 30 min to resolution
   maxPositionSize: 50, // Max position for small balance
-  minPositionSize: 1, // Min $1 position (lowered for small balance)
-  minAnnualizedReturn: 15, // 15% annualized minimum (lowered from 50%)
+  minPositionSize: 1, // Min $1 position
+  minAnnualizedReturn: 10, // 10% annualized minimum (lowered from 15%)
 };
 
 /**
@@ -133,6 +133,38 @@ export class EndgameStrategy extends EventEmitter {
       }
     }
 
+    // Log diagnostics for why strategy doesn't trigger
+    if (opportunities.length === 0) {
+      if (Math.random() < 0.01) { // Log 1% of non-opportunities for diagnostics
+        const yesProb = yesOutcome.bestAsk || 0;
+        const noProb = noOutcome.bestAsk || 0;
+        const maxProb = Math.max(yesProb, noProb);
+        
+        let reason = '';
+        if (maxProb < this.config.minProbability) {
+          reason = `Max probability ${(maxProb * 100).toFixed(1)}% < threshold ${(this.config.minProbability * 100).toFixed(1)}%`;
+        } else if (maxProb > this.config.maxProbability) {
+          reason = `Max probability ${(maxProb * 100).toFixed(1)}% > max ${(this.config.maxProbability * 100).toFixed(1)}% (stale?)`;
+        } else {
+          // Check annualized return
+          const testProfit = this.calculatePotentialProfit(maxProb);
+          const testAnnualized = this.calculateAnnualizedReturn(testProfit, hoursToResolution);
+          if (testAnnualized < this.config.minAnnualizedReturn) {
+            reason = `Annualized return ${testAnnualized.toFixed(1)}% < threshold ${this.config.minAnnualizedReturn}%`;
+          }
+        }
+        
+        this.log.debug('Endgame: No opportunity', {
+          market: market.title.substring(0, 40),
+          hoursToRes: hoursToResolution.toFixed(1),
+          yesAsk: yesProb.toFixed(3),
+          noAsk: noProb.toFixed(3),
+          reason,
+        });
+      }
+      return null;
+    }
+
     this.log.debug('Endgame check', {
       market: market.title.substring(0, 40),
       hoursToRes: hoursToResolution.toFixed(1),
@@ -140,8 +172,6 @@ export class EndgameStrategy extends EventEmitter {
       noAsk: noOutcome.bestAsk?.toFixed(3),
       opportunities: opportunities.length,
     });
-
-    if (opportunities.length === 0) return null;
 
     // Take the best opportunity (highest annualized return)
     const best = opportunities.reduce((a, b) => 
@@ -185,12 +215,21 @@ export class EndgameStrategy extends EventEmitter {
    * Get hours until market resolution
    */
   private getHoursToResolution(market: NormalizedMarket): number | null {
-    // Try to parse resolution date from market data
-    // This depends on your NormalizedMarket structure
-    
-    // Check if market has endDate or resolutionTime
-    const endDate = (market as any).endDate || (market as any).resolutionTime;
-    if (!endDate) return null;
+    // Use market.endDate from NormalizedMarket interface
+    const endDate = market.endDate;
+    if (!endDate) {
+      // Fallback: check metadata if endDate is missing
+      const metadata = (market as any).raw;
+      if (metadata && (metadata.endDate || metadata.close_time || metadata.resolutionTime)) {
+        const fallbackDate = metadata.endDate || metadata.close_time || metadata.resolutionTime;
+        const resolutionTime = new Date(fallbackDate);
+        const now = new Date();
+        if (resolutionTime <= now) return null;
+        const msToResolution = resolutionTime.getTime() - now.getTime();
+        return msToResolution / (1000 * 60 * 60);
+      }
+      return null;
+    }
 
     const resolutionTime = new Date(endDate);
     const now = new Date();

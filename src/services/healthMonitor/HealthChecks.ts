@@ -261,14 +261,16 @@ export async function checkPolymarketClobApi(): Promise<HealthCheckResult> {
 }
 
 /**
- * Check Polymarket Data API
+ * Check Polymarket Gamma API (market data)
+ * Uses gamma-api.polymarket.com which is the public market data endpoint
  */
 export async function checkPolymarketDataApi(): Promise<HealthCheckResult> {
   const startTime = Date.now();
   const name = 'polymarket_data_api';
 
   try {
-    const response = await fetch('https://data-api.polymarket.com/markets?limit=1', {
+    // Use gamma-api which is the correct endpoint for market data
+    const response = await fetch('https://gamma-api.polymarket.com/markets?limit=1&active=true', {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
       },
@@ -278,24 +280,29 @@ export async function checkPolymarketDataApi(): Promise<HealthCheckResult> {
       throw new Error(`HTTP ${response.status}`);
     }
 
-    await response.json();
+    const data = await response.json() as unknown[];
 
     return {
       name,
       status: 'healthy',
-      message: 'Polymarket Data API accessible',
+      message: 'Polymarket Gamma API accessible',
       latencyMs: Date.now() - startTime,
+      details: {
+        marketsReturned: Array.isArray(data) ? data.length : 0,
+      },
       timestamp: new Date(),
     };
   } catch (error) {
-    log.error('Polymarket Data API check failed', {
+    log.error('Polymarket Gamma API check failed', {
       error: error instanceof Error ? error.message : String(error),
     });
 
+    // Data API is optional - don't mark as unhealthy, just degraded
+    // The CLOB API is the critical one for trading
     return {
       name,
-      status: 'unhealthy',
-      message: `Data API check failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      status: 'degraded',
+      message: `Gamma API check failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
       latencyMs: Date.now() - startTime,
       timestamp: new Date(),
     };

@@ -13,6 +13,7 @@
  * - System resources
  */
 
+import { Wallet } from 'ethers';
 import { createComponentLogger } from '../../utils/logger.js';
 import { getConfig } from '../../config/index.js';
 
@@ -218,6 +219,37 @@ async function queryNativeBalance(address: string): Promise<number> {
 }
 
 /**
+ * Get the correct wallet address for balance checks
+ * For EOA mode: balance is in the EOA wallet (derived from private key)
+ * For PROXY/GNOSIS mode: balance is in the funder address (proxy wallet)
+ */
+function getWalletAddressForBalanceCheck(config: ReturnType<typeof getConfig>): string | null {
+  const signatureType = config.polymarket.signatureType || 'EOA';
+  const privateKey = config.polymarket.privateKey;
+  const funderAddress = config.polymarket.funderAddress;
+
+  // If no private key, we're in read-only/paper trading mode
+  if (!privateKey) {
+    return null;
+  }
+
+  // For EOA mode, derive the address from private key
+  // This is where the balance actually is
+  if (signatureType === 'EOA') {
+    try {
+      const wallet = new Wallet(privateKey);
+      return wallet.address;
+    } catch {
+      // If private key is invalid, fall back to funder address
+      return funderAddress || null;
+    }
+  }
+
+  // For PROXY/GNOSIS mode, use funder address (proxy wallet)
+  return funderAddress || null;
+}
+
+/**
  * Check wallet balance (USDC for trading + MATIC for gas)
  * Uses direct blockchain queries for accurate balance (same as PolymarketClient)
  */
@@ -227,9 +259,9 @@ export async function checkWalletBalance(minBalanceUsdc: number = 1): Promise<He
 
   try {
     const config = getConfig();
-    const funderAddress = config.polymarket.funderAddress;
+    const walletAddress = getWalletAddressForBalanceCheck(config);
 
-    if (!funderAddress) {
+    if (!walletAddress) {
       return {
         name,
         status: 'healthy',
@@ -241,8 +273,8 @@ export async function checkWalletBalance(minBalanceUsdc: number = 1): Promise<He
 
     // Query both USDC and MATIC balances
     const [usdcBalance, maticBalance] = await Promise.all([
-      queryOnChainUsdcBalance(funderAddress),
-      queryNativeBalance(funderAddress),
+      queryOnChainUsdcBalance(walletAddress),
+      queryNativeBalance(walletAddress),
     ]);
 
     // Determine status based on USDC (trading) and MATIC (gas) balances
@@ -273,7 +305,8 @@ export async function checkWalletBalance(minBalanceUsdc: number = 1): Promise<He
       details: {
         usdcBalance: usdcBalance.toFixed(2),
         maticBalance: maticBalance.toFixed(6),
-        walletAddress: funderAddress.slice(0, 10) + '...',
+        walletAddress: walletAddress.slice(0, 10) + '...',
+        signatureType: config.polymarket.signatureType || 'EOA',
       },
       timestamp: new Date(),
     };

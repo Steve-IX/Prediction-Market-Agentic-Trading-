@@ -129,18 +129,107 @@ export async function checkRpcProvider(): Promise<HealthCheckResult> {
   }
 }
 
+// USDC.e contract address on Polygon (what Polymarket uses)
+const POLYGON_USDC_ADDRESS = '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174';
+
+// Polygon RPC endpoints (public) - same as PolymarketClient
+const POLYGON_RPC_URLS = [
+  'https://polygon-rpc.com',
+  'https://rpc-mainnet.matic.network',
+  'https://rpc-mainnet.maticvigil.com',
+];
+
 /**
- * Check wallet balance
+ * Query USDC balance directly from Polygon blockchain
+ * This matches the approach used in PolymarketClient for accurate balance
  */
-export async function checkWalletBalance(_minBalanceUsdc: number = 1): Promise<HealthCheckResult> {
+async function queryOnChainUsdcBalance(address: string): Promise<number> {
+  if (!address) return 0;
+
+  for (const rpcUrl of POLYGON_RPC_URLS) {
+    try {
+      // Call balanceOf on USDC contract
+      const response = await fetch(rpcUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          method: 'eth_call',
+          params: [
+            {
+              to: POLYGON_USDC_ADDRESS,
+              data: `0x70a08231000000000000000000000000${address.slice(2).toLowerCase()}`, // balanceOf(address)
+            },
+            'latest',
+          ],
+          id: 1,
+        }),
+      });
+
+      if (!response.ok) continue;
+
+      const data = await response.json() as { result: string };
+      if (!data.result || data.result === '0x') continue;
+
+      // USDC has 6 decimals
+      const balanceRaw = BigInt(data.result);
+      return Number(balanceRaw) / 1e6;
+    } catch {
+      // Try next RPC endpoint
+      continue;
+    }
+  }
+
+  return 0;
+}
+
+/**
+ * Query native MATIC balance for gas
+ */
+async function queryNativeBalance(address: string): Promise<number> {
+  if (!address) return 0;
+
+  for (const rpcUrl of POLYGON_RPC_URLS) {
+    try {
+      const response = await fetch(rpcUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          method: 'eth_getBalance',
+          params: [address, 'latest'],
+          id: 1,
+        }),
+      });
+
+      if (!response.ok) continue;
+
+      const data = await response.json() as { result: string };
+      if (!data.result) continue;
+
+      const balanceWei = BigInt(data.result);
+      return Number(balanceWei) / 1e18;
+    } catch {
+      continue;
+    }
+  }
+
+  return 0;
+}
+
+/**
+ * Check wallet balance (USDC for trading + MATIC for gas)
+ * Uses direct blockchain queries for accurate balance (same as PolymarketClient)
+ */
+export async function checkWalletBalance(minBalanceUsdc: number = 1): Promise<HealthCheckResult> {
   const startTime = Date.now();
   const name = 'wallet_balance';
 
   try {
     const config = getConfig();
-    const walletAddress = config.polymarket.funderAddress;
+    const funderAddress = config.polymarket.funderAddress;
 
-    if (!walletAddress) {
+    if (!funderAddress) {
       return {
         name,
         status: 'healthy',
@@ -150,41 +239,30 @@ export async function checkWalletBalance(_minBalanceUsdc: number = 1): Promise<H
       };
     }
 
-    // Use default Polygon RPC for balance check
-    const rpcUrl = 'https://polygon-rpc.com';
+    // Query both USDC and MATIC balances
+    const [usdcBalance, maticBalance] = await Promise.all([
+      queryOnChainUsdcBalance(funderAddress),
+      queryNativeBalance(funderAddress),
+    ]);
 
-    const response = await fetch(rpcUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        method: 'eth_getBalance',
-        params: [walletAddress, 'latest'],
-        id: 1,
-      }),
-    });
-
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
-    }
-
-    const data = await response.json() as { result: string };
-    const balanceWei = BigInt(data.result);
-    const balanceEth = Number(balanceWei) / 1e18;
-
-    // Determine status based on balance thresholds
+    // Determine status based on USDC (trading) and MATIC (gas) balances
     let status: HealthCheckResult['status'];
     let message: string;
 
-    if (balanceEth < 0.001) {
+    // Primary check is USDC trading balance
+    if (usdcBalance < minBalanceUsdc) {
       status = 'unhealthy';
-      message = 'ETH balance critically low for gas';
-    } else if (balanceEth < 0.01) {
+      message = `USDC balance low: $${usdcBalance.toFixed(2)}`;
+    } else if (maticBalance < 0.001) {
+      // Low gas is degraded, not unhealthy - can still have trading funds
       status = 'degraded';
-      message = 'ETH balance low for gas';
+      message = `MATIC low for gas (${maticBalance.toFixed(4)} MATIC), USDC: $${usdcBalance.toFixed(2)}`;
+    } else if (maticBalance < 0.01) {
+      status = 'degraded';
+      message = `MATIC getting low (${maticBalance.toFixed(4)} MATIC), USDC: $${usdcBalance.toFixed(2)}`;
     } else {
       status = 'healthy';
-      message = 'Wallet balance sufficient';
+      message = `USDC: $${usdcBalance.toFixed(2)}, MATIC: ${maticBalance.toFixed(4)}`;
     }
 
     return {
@@ -193,8 +271,9 @@ export async function checkWalletBalance(_minBalanceUsdc: number = 1): Promise<H
       message,
       latencyMs: Date.now() - startTime,
       details: {
-        balanceEth: balanceEth.toFixed(6),
-        walletAddress: walletAddress.slice(0, 10) + '...',
+        usdcBalance: usdcBalance.toFixed(2),
+        maticBalance: maticBalance.toFixed(6),
+        walletAddress: funderAddress.slice(0, 10) + '...',
       },
       timestamp: new Date(),
     };
@@ -205,8 +284,8 @@ export async function checkWalletBalance(_minBalanceUsdc: number = 1): Promise<H
 
     return {
       name,
-      status: 'unhealthy',
-      message: `Wallet balance check failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      status: 'degraded',
+      message: `Balance check failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
       latencyMs: Date.now() - startTime,
       timestamp: new Date(),
     };

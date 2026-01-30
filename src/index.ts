@@ -6,6 +6,9 @@ import { PolymarketClient } from './clients/polymarket/index.js';
 import { KalshiClient } from './clients/kalshi/index.js';
 import { OrderManager } from './services/orderManager/index.js';
 import { TradingEngine } from './tradingEngine.js';
+import { CopyTradingService } from './services/copyTrading/CopyTradingService.js';
+import { TraderDiscoveryService } from './services/traderDiscovery/TraderDiscoveryService.js';
+import { HealthMonitorService } from './services/healthMonitor/HealthMonitorService.js';
 import { getMetrics, getContentType } from './utils/metrics.js';
 import type { AccountBalance } from './clients/shared/interfaces.js';
 import express from 'express';
@@ -95,6 +98,69 @@ async function main(): Promise<void> {
     }
   }
 
+  // Initialize Copy Trading Service (if enabled)
+  let copyTradingService: CopyTradingService | null = null;
+  if (config.copyTrading?.enabled && polymarket.isConnected()) {
+    try {
+      copyTradingService = new CopyTradingService(
+        polymarket,
+        orderManager,
+        config.copyTrading
+      );
+      log.info('Copy trading service initialized', {
+        enabled: config.copyTrading.enabled,
+        sizingStrategy: config.copyTrading.defaultSizingStrategy,
+      });
+    } catch (error) {
+      log.error('Failed to initialize copy trading service', { error });
+    }
+  }
+
+  // Initialize Trader Discovery Service (if enabled)
+  let traderDiscoveryService: TraderDiscoveryService | null = null;
+  if (config.traderDiscovery?.enabled) {
+    try {
+      traderDiscoveryService = new TraderDiscoveryService({
+        enabled: config.traderDiscovery.enabled,
+        dataApiUrl: config.traderDiscovery.polymarketDataApiUrl,
+        cacheEnabled: true,
+        cacheTtlMs: config.traderDiscovery.cacheExpirationMs,
+        defaultTimeframeDays: config.traderDiscovery.analysisTimeframeDays,
+      });
+      await traderDiscoveryService.start();
+      log.info('Trader discovery service initialized', {
+        enabled: config.traderDiscovery.enabled,
+        timeframeDays: config.traderDiscovery.analysisTimeframeDays,
+      });
+    } catch (error) {
+      log.error('Failed to initialize trader discovery service', { error });
+    }
+  }
+
+  // Initialize Health Monitor Service (if enabled)
+  let healthMonitorService: HealthMonitorService | null = null;
+  if (config.healthMonitoring?.enabled) {
+    try {
+      healthMonitorService = new HealthMonitorService({
+        enabled: config.healthMonitoring.enabled,
+        checkIntervalMs: config.healthMonitoring.checkIntervalMs,
+        fileLogging: {
+          enabled: config.healthMonitoring.enableFileLogging,
+          directory: config.healthMonitoring.logFilePath || './logs',
+          maxFiles: `${config.healthMonitoring.logRotationDays || 7}d`,
+          maxSize: `${config.healthMonitoring.logMaxSizeMb || 20}m`,
+        },
+      });
+      await healthMonitorService.start();
+      log.info('Health monitor service initialized', {
+        enabled: config.healthMonitoring.enabled,
+        fileLogging: config.healthMonitoring.enableFileLogging,
+      });
+    } catch (error) {
+      log.error('Failed to initialize health monitor service', { error });
+    }
+  }
+
   // Start API server
   const app = express();
   app.use(express.json());
@@ -118,6 +184,8 @@ async function main(): Promise<void> {
   const { createTradesRouter } = await import('./api/routes/trades.js');
   const { createStrategiesRouter } = await import('./api/routes/strategies.js');
   const { createOrdersRouter } = await import('./api/routes/orders.js');
+  const { createCopyTradingRouter } = await import('./api/routes/copyTrading.js');
+  const { createTraderDiscoveryRouter } = await import('./api/routes/traderDiscovery.js');
   const { StrategyRegistry } = await import('./strategies/index.js');
 
   // Create strategy registry (empty for now - strategies would be registered here)
@@ -134,6 +202,22 @@ async function main(): Promise<void> {
   app.use('/api/trades', createTradesRouter(orderManager));
   app.use('/api/orders', createOrdersRouter(orderManager));
   app.use('/api/strategies', createStrategiesRouter(strategyRegistry));
+
+  // Copy Trading routes (if service is initialized)
+  if (copyTradingService) {
+    app.use('/api/copy-trading', createCopyTradingRouter({
+      copyTradingService,
+    }));
+    log.info('Copy trading API routes registered');
+  }
+
+  // Trader Discovery routes (if service is initialized)
+  if (traderDiscoveryService) {
+    app.use('/api/trader-discovery', createTraderDiscoveryRouter({
+      traderDiscoveryService,
+    }));
+    log.info('Trader discovery API routes registered');
+  }
 
   // Legacy health check endpoint (keep for backward compatibility)
   app.get('/health', async (_req, res) => {
@@ -434,6 +518,21 @@ async function main(): Promise<void> {
         await tradingEngine.stop();
       }
 
+      // Stop copy trading service
+      if (copyTradingService) {
+        await copyTradingService.stop();
+      }
+
+      // Stop trader discovery service
+      if (traderDiscoveryService) {
+        await traderDiscoveryService.stop();
+      }
+
+      // Stop health monitor service
+      if (healthMonitorService) {
+        healthMonitorService.stop();
+      }
+
       await polymarket.disconnect();
       await kalshi.disconnect();
       await closeDb();
@@ -473,6 +572,8 @@ async function main(): Promise<void> {
     tradingStop: 'POST /api/trading/stop',
     tradingScan: 'POST /api/trading/scan',
     killSwitch: 'POST /api/kill-switch',
+    copyTrading: copyTradingService ? '/api/copy-trading/*' : 'disabled',
+    traderDiscovery: traderDiscoveryService ? '/api/trader-discovery/*' : 'disabled',
   });
 }
 

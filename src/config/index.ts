@@ -24,6 +24,61 @@ function parseNumber(value: string | undefined, defaultValue: number): number {
 }
 
 /**
+ * Parse tiered multipliers from environment variable
+ * Format: JSON array like [{"minSize":0,"maxSize":100,"multiplier":2.0},{"minSize":100,"maxSize":500,"multiplier":1.0}]
+ * Or simplified format: "0-100:2.0,100-500:1.0,500-1000:0.5"
+ */
+function parseTieredMultipliers(value: string | undefined): Array<{ minSize: number; maxSize: number; multiplier: number }> {
+  if (!value || value.trim() === '') return [];
+
+  try {
+    // Try JSON format first
+    if (value.trim().startsWith('[')) {
+      return JSON.parse(value);
+    }
+
+    // Parse simplified format: "0-100:2.0,100-500:1.0"
+    const tiers: Array<{ minSize: number; maxSize: number; multiplier: number }> = [];
+    const parts = value.split(',').map((p) => p.trim()).filter((p) => p);
+
+    for (const part of parts) {
+      const splitPart = part.split(':');
+      if (splitPart.length !== 2) continue;
+
+      const range = splitPart[0];
+      const multiplierStr = splitPart[1];
+      if (!range || !multiplierStr) continue;
+
+      const multiplier = parseFloat(multiplierStr);
+      if (isNaN(multiplier)) continue;
+
+      // Handle "500+" format (infinite upper bound)
+      if (range.endsWith('+')) {
+        const min = parseFloat(range.slice(0, -1));
+        if (!isNaN(min)) {
+          tiers.push({ minSize: min, maxSize: Number.MAX_SAFE_INTEGER, multiplier });
+        }
+      } else if (range.includes('-')) {
+        const rangeParts = range.split('-');
+        if (rangeParts.length !== 2) continue;
+        const minStr = rangeParts[0];
+        const maxStr = rangeParts[1];
+        if (!minStr || !maxStr) continue;
+        const min = parseFloat(minStr);
+        const max = parseFloat(maxStr);
+        if (!isNaN(min) && !isNaN(max)) {
+          tiers.push({ minSize: min, maxSize: max, multiplier });
+        }
+      }
+    }
+
+    return tiers;
+  } catch {
+    return [];
+  }
+}
+
+/**
  * Get Kalshi host based on environment
  */
 function getKalshiHost(environment: 'demo' | 'prod'): string {
@@ -147,6 +202,81 @@ function buildConfigFromEnv(): unknown {
       apiKey: env['ANTHROPIC_API_KEY'],
       model: env['ANTHROPIC_MODEL'] || 'claude-sonnet-4-20250514',
       maxTokens: parseNumber(env['ANTHROPIC_MAX_TOKENS'], 1024),
+    },
+
+    copyTrading: {
+      enabled: parseBoolean(env['COPY_TRADING_ENABLED'], false),
+      // Monitoring settings
+      pollIntervalMs: parseNumber(env['COPY_TRADING_POLL_INTERVAL_MS'], 5000),
+      useWebSocket: parseBoolean(env['COPY_TRADING_USE_WEBSOCKET'], true),
+      // Copy execution settings
+      copyDelayMs: parseNumber(env['COPY_TRADING_COPY_DELAY_MS'], 1000),
+      maxConcurrentCopies: parseNumber(env['COPY_TRADING_MAX_CONCURRENT'], 3),
+      maxSlippagePercent: parseNumber(env['COPY_TRADING_MAX_SLIPPAGE'], 2),
+      // Default position sizing
+      defaultSizingStrategy: (env['COPY_TRADING_SIZING_STRATEGY'] as 'PERCENTAGE' | 'FIXED' | 'ADAPTIVE') || 'PERCENTAGE',
+      defaultMultiplier: parseNumber(env['COPY_TRADING_MULTIPLIER'], 1.0),
+      defaultCopyPercentage: parseNumber(env['COPY_TRADING_COPY_PERCENTAGE'], 10),
+      defaultMaxPositionSize: parseNumber(env['COPY_TRADING_MAX_POSITION_SIZE'], 100),
+      defaultMinTradeSize: parseNumber(env['COPY_TRADING_MIN_TRADE_SIZE'], 1),
+      // Aggregation settings
+      aggregationEnabled: parseBoolean(env['COPY_TRADING_AGGREGATION_ENABLED'], true),
+      aggregationWindowMs: parseNumber(env['COPY_TRADING_AGGREGATION_WINDOW_MS'], 30000),
+      aggregationMinTrades: parseNumber(env['COPY_TRADING_AGGREGATION_MIN_TRADES'], 2),
+      // Risk limits
+      maxTotalCopyExposure: parseNumber(env['COPY_TRADING_MAX_EXPOSURE'], 1000),
+      maxPositionsPerTrader: parseNumber(env['COPY_TRADING_MAX_POSITIONS_PER_TRADER'], 10),
+      // Tiered multipliers (parsed from JSON string if provided)
+      defaultTieredMultipliers: parseTieredMultipliers(env['COPY_TRADING_TIERED_MULTIPLIERS']),
+    },
+
+    traderDiscovery: {
+      enabled: parseBoolean(env['TRADER_DISCOVERY_ENABLED'], false),
+      // Data source settings
+      polymarketDataApiUrl: env['TRADER_DISCOVERY_DATA_API_URL'] || 'https://data-api.polymarket.com',
+      // Analysis settings
+      minTradesForAnalysis: parseNumber(env['TRADER_DISCOVERY_MIN_TRADES'], 10),
+      minActiveDays: parseNumber(env['TRADER_DISCOVERY_MIN_ACTIVE_DAYS'], 7),
+      analysisTimeframeDays: parseNumber(env['TRADER_DISCOVERY_TIMEFRAME_DAYS'], 30),
+      maxTradesLimit: parseNumber(env['TRADER_DISCOVERY_MAX_TRADES_LIMIT'], 5000),
+      // Ranking weights
+      roiWeight: parseNumber(env['TRADER_DISCOVERY_ROI_WEIGHT'], 0.3),
+      winRateWeight: parseNumber(env['TRADER_DISCOVERY_WIN_RATE_WEIGHT'], 0.25),
+      profitFactorWeight: parseNumber(env['TRADER_DISCOVERY_PROFIT_FACTOR_WEIGHT'], 0.25),
+      consistencyWeight: parseNumber(env['TRADER_DISCOVERY_CONSISTENCY_WEIGHT'], 0.2),
+      // Ranking filters
+      minWinRate: parseNumber(env['TRADER_DISCOVERY_MIN_WIN_RATE'], 0.5),
+      minRoi: parseNumber(env['TRADER_DISCOVERY_MIN_ROI'], -50),
+      maxDrawdown: parseNumber(env['TRADER_DISCOVERY_MAX_DRAWDOWN'], 50),
+      // Cache settings
+      cacheExpirationMs: parseNumber(env['TRADER_DISCOVERY_CACHE_EXPIRATION_MS'], 3600000),
+      maxCachedTraders: parseNumber(env['TRADER_DISCOVERY_MAX_CACHED_TRADERS'], 1000),
+      // Simulation defaults
+      defaultSimulationDays: parseNumber(env['TRADER_DISCOVERY_SIMULATION_DAYS'], 30),
+      defaultSimulationCapital: parseNumber(env['TRADER_DISCOVERY_SIMULATION_CAPITAL'], 10000),
+      defaultSimulationSlippage: parseNumber(env['TRADER_DISCOVERY_SIMULATION_SLIPPAGE'], 0.5),
+    },
+
+    healthMonitoring: {
+      enabled: parseBoolean(env['HEALTH_MONITORING_ENABLED'], true),
+      // Check intervals
+      checkIntervalMs: parseNumber(env['HEALTH_CHECK_INTERVAL_MS'], 30000),
+      // Timeouts
+      dbTimeoutMs: parseNumber(env['HEALTH_DB_TIMEOUT_MS'], 5000),
+      rpcTimeoutMs: parseNumber(env['HEALTH_RPC_TIMEOUT_MS'], 10000),
+      apiTimeoutMs: parseNumber(env['HEALTH_API_TIMEOUT_MS'], 10000),
+      // Balance thresholds
+      minBalanceWarning: parseNumber(env['HEALTH_MIN_BALANCE_WARNING'], 10),
+      minBalanceCritical: parseNumber(env['HEALTH_MIN_BALANCE_CRITICAL'], 1),
+      // File logging
+      enableFileLogging: parseBoolean(env['HEALTH_FILE_LOGGING_ENABLED'], true),
+      logFilePath: env['HEALTH_LOG_FILE_PATH'] || './logs',
+      logRotationDays: parseNumber(env['HEALTH_LOG_ROTATION_DAYS'], 7),
+      maxLogFiles: parseNumber(env['HEALTH_MAX_LOG_FILES'], 30),
+      logMaxSizeMb: parseNumber(env['HEALTH_LOG_MAX_SIZE_MB'], 50),
+      // Console output
+      enableConsoleProgress: parseBoolean(env['HEALTH_CONSOLE_PROGRESS'], true),
+      enableColoredOutput: parseBoolean(env['HEALTH_COLORED_OUTPUT'], true),
     },
   };
 }

@@ -108,7 +108,7 @@ export interface OrderRequest {
   side: OrderSide;
   /** Price (0-1 normalized) */
   price: number;
-  /** Size in USD */
+  /** Size in shares (contracts); USD notional = size × price */
   size: number;
   /** Order type */
   type: OrderType;

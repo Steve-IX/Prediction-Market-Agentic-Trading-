@@ -57,6 +57,10 @@ const TradingConfigSchema = z.object({
   executionTimeoutMs: z.number().positive().default(5000),
   orderRetryAttempts: z.number().min(0).max(10).default(3),
   orderRetryDelayMs: z.number().positive().default(1000),
+  marketRefreshIntervalMs: z.number().positive().default(600000),
+  pricePollIntervalMs: z.number().positive().default(30000),
+  maxWsSubscriptions: z.number().positive().default(200),
+  autoStartTrading: z.boolean().default(false),
 });
 
 // API configuration schema

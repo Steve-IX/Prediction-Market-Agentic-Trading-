@@ -69,8 +69,7 @@ export class ArbitrageDetector {
     const config = getConfig();
     this.minSpreadBps = config.risk.minArbitrageSpreadBps;
 
-    // Cross-platform buffer to account for oracle risk, settlement timing, etc.
-    this.crossPlatformBuffer = 0.15; // 15 cents buffer for cross-platform arb
+    this.crossPlatformBuffer = config.risk.crossPlatformSpreadBuffer;
 
     // Platform fee structures
     this.fees = new Map([

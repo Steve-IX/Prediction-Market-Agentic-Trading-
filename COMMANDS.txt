@@ -1,0 +1,351 @@
+# ============================================================================
+# PREDICTION MARKET TRADING BOT - COMMAND REFERENCE
+# ============================================================================
+# Set your base URL (update this to your deployment URL)
+$url = "https://web-production-68225.up.railway.app"
+
+# ============================================================================
+# CORE TRADING OPERATIONS
+# ============================================================================
+
+# Check trading status
+Invoke-RestMethod -Uri "$url/api/trading/status" | ConvertTo-Json
+
+# Start trading
+Invoke-RestMethod -Method POST -Uri "$url/api/trading/start" | ConvertTo-Json
+
+# Stop trading
+Invoke-RestMethod -Method POST -Uri "$url/api/trading/stop" | ConvertTo-Json
+
+# Kill switch (emergency stop - stops everything immediately)
+Invoke-RestMethod -Method POST -Uri "$url/api/kill-switch" | ConvertTo-Json
+
+# Check recent trades
+Invoke-RestMethod -Uri "$url/api/trades" | ConvertTo-Json
+
+# Check positions
+Invoke-RestMethod -Uri "$url/api/positions" | ConvertTo-Json
+
+# Check balances
+Invoke-RestMethod -Uri "$url/api/balances" | ConvertTo-Json
+
+# Check health
+Invoke-RestMethod -Uri "$url/api/health" | ConvertTo-Json
+
+# Get Prometheus metrics
+Invoke-RestMethod -Uri "$url/metrics"
+
+# ============================================================================
+# TRADER DISCOVERY - Find & Analyze Profitable Traders
+# ============================================================================
+
+# Get top 10 ranked traders
+Invoke-RestMethod -Uri "$url/api/trader-discovery/top?count=10" | ConvertTo-Json -Depth 10
+
+# Get top 20 traders with conservative ranking
+Invoke-RestMethod -Uri "$url/api/trader-discovery/top?count=20&preset=conservative" | ConvertTo-Json -Depth 10
+
+# Get top traders with aggressive ranking (higher ROI focus)
+Invoke-RestMethod -Uri "$url/api/trader-discovery/top?count=10&preset=aggressive" | ConvertTo-Json -Depth 10
+
+# Analyze a specific trader (replace ADDRESS with actual address)
+$traderAddress = "0x1234567890abcdef1234567890abcdef12345678"
+Invoke-RestMethod -Uri "$url/api/trader-discovery/analyze/$traderAddress" | ConvertTo-Json -Depth 10
+
+# Analyze with custom timeframe (90 days)
+Invoke-RestMethod -Uri "$url/api/trader-discovery/analyze/$traderAddress`?timeframeDays=90" | ConvertTo-Json -Depth 10
+
+# Get trader's trade history
+Invoke-RestMethod -Uri "$url/api/trader-discovery/trades/$traderAddress`?days=30&limit=100" | ConvertTo-Json -Depth 10
+
+# Get ranking presets available
+Invoke-RestMethod -Uri "$url/api/trader-discovery/ranking/presets" | ConvertTo-Json -Depth 10
+
+# Get cache statistics
+Invoke-RestMethod -Uri "$url/api/trader-discovery/cache/stats" | ConvertTo-Json
+
+# Clear trader discovery cache
+Invoke-RestMethod -Method DELETE -Uri "$url/api/trader-discovery/cache" | ConvertTo-Json
+
+# ============================================================================
+# COPY TRADING SIMULATION - Backtest Before Committing
+# ============================================================================
+
+# Simulate copy trading for a trader
+$simulationBody = @{
+    traderAddress = "0x1234567890abcdef1234567890abcdef12345678"
+    startingCapital = 1000
+    sizingStrategy = "PERCENTAGE"
+    multiplier = 0.5
+    maxPositionSize = 100
+} | ConvertTo-Json
+
+Invoke-RestMethod -Method POST -Uri "$url/api/trader-discovery/simulate" -Body $simulationBody -ContentType "application/json" | ConvertTo-Json -Depth 10
+
+# Simulate with date range
+$simulationBody = @{
+    traderAddress = "0x1234567890abcdef1234567890abcdef12345678"
+    startingCapital = 1000
+    sizingStrategy = "PERCENTAGE"
+    multiplier = 0.5
+    maxPositionSize = 100
+    startDate = "2024-01-01"
+    endDate = "2024-12-31"
+} | ConvertTo-Json
+
+Invoke-RestMethod -Method POST -Uri "$url/api/trader-discovery/simulate" -Body $simulationBody -ContentType "application/json" | ConvertTo-Json -Depth 10
+
+# Batch simulate multiple traders
+$batchBody = @{
+    traderAddresses = @(
+        "0x1111111111111111111111111111111111111111",
+        "0x2222222222222222222222222222222222222222",
+        "0x3333333333333333333333333333333333333333"
+    )
+    startingCapital = 1000
+    sizingStrategy = "PERCENTAGE"
+    multiplier = 0.5
+    maxPositionSize = 100
+} | ConvertTo-Json
+
+Invoke-RestMethod -Method POST -Uri "$url/api/trader-discovery/simulate/batch" -Body $batchBody -ContentType "application/json" | ConvertTo-Json -Depth 10
+
+# Compare different sizing strategies for a trader
+$compareBody = @{
+    traderAddress = "0x1234567890abcdef1234567890abcdef12345678"
+    startingCapital = 1000
+    maxPositionSize = 100
+} | ConvertTo-Json
+
+Invoke-RestMethod -Method POST -Uri "$url/api/trader-discovery/compare-strategies" -Body $compareBody -ContentType "application/json" | ConvertTo-Json -Depth 10
+
+# ============================================================================
+# COPY TRADING - Live Trade Copying
+# ============================================================================
+
+# Get copy trading status
+Invoke-RestMethod -Uri "$url/api/copy-trading/status" | ConvertTo-Json -Depth 10
+
+# Start copy trading
+Invoke-RestMethod -Method POST -Uri "$url/api/copy-trading/start" | ConvertTo-Json
+
+# Stop copy trading
+Invoke-RestMethod -Method POST -Uri "$url/api/copy-trading/stop" | ConvertTo-Json
+
+# List all tracked traders
+Invoke-RestMethod -Uri "$url/api/copy-trading/traders" | ConvertTo-Json -Depth 10
+
+# Add a trader to track (PERCENTAGE sizing)
+$addTraderBody = @{
+    address = "0x1234567890abcdef1234567890abcdef12345678"
+    name = "TopTrader"
+    sizingStrategy = "PERCENTAGE"
+    multiplier = 0.5
+    maxPositionSize = 100
+    minPositionSize = 1
+} | ConvertTo-Json
+
+Invoke-RestMethod -Method POST -Uri "$url/api/copy-trading/traders" -Body $addTraderBody -ContentType "application/json" | ConvertTo-Json
+
+# Add a trader with FIXED sizing
+$addTraderBody = @{
+    address = "0x1234567890abcdef1234567890abcdef12345678"
+    name = "FixedTrader"
+    sizingStrategy = "FIXED"
+    fixedAmount = 10
+    maxPositionSize = 50
+} | ConvertTo-Json
+
+Invoke-RestMethod -Method POST -Uri "$url/api/copy-trading/traders" -Body $addTraderBody -ContentType "application/json" | ConvertTo-Json
+
+# Add a trader with ADAPTIVE sizing (adjusts based on performance)
+$addTraderBody = @{
+    address = "0x1234567890abcdef1234567890abcdef12345678"
+    name = "AdaptiveTrader"
+    sizingStrategy = "ADAPTIVE"
+    multiplier = 1.0
+    maxPositionSize = 100
+} | ConvertTo-Json
+
+Invoke-RestMethod -Method POST -Uri "$url/api/copy-trading/traders" -Body $addTraderBody -ContentType "application/json" | ConvertTo-Json
+
+# Add a trader with tiered multipliers (different sizes = different multipliers)
+$addTraderBody = @{
+    address = "0x1234567890abcdef1234567890abcdef12345678"
+    name = "TieredTrader"
+    sizingStrategy = "PERCENTAGE"
+    multiplier = 1.0
+    maxPositionSize = 100
+    tieredMultipliers = @(
+        @{ minSize = 0; maxSize = 50; multiplier = 1.5 }
+        @{ minSize = 50; maxSize = 200; multiplier = 1.0 }
+        @{ minSize = 200; maxSize = 1000; multiplier = 0.5 }
+    )
+} | ConvertTo-Json -Depth 5
+
+Invoke-RestMethod -Method POST -Uri "$url/api/copy-trading/traders" -Body $addTraderBody -ContentType "application/json" | ConvertTo-Json
+
+# Get details of a specific tracked trader
+$traderAddress = "0x1234567890abcdef1234567890abcdef12345678"
+Invoke-RestMethod -Uri "$url/api/copy-trading/traders/$traderAddress" | ConvertTo-Json -Depth 10
+
+# Update a tracked trader's config
+$updateBody = @{
+    multiplier = 0.75
+    maxPositionSize = 150
+    isActive = $true
+} | ConvertTo-Json
+
+Invoke-RestMethod -Method PUT -Uri "$url/api/copy-trading/traders/$traderAddress" -Body $updateBody -ContentType "application/json" | ConvertTo-Json
+
+# Pause a trader (stop copying but keep tracking)
+$pauseBody = @{ isActive = $false } | ConvertTo-Json
+Invoke-RestMethod -Method PUT -Uri "$url/api/copy-trading/traders/$traderAddress" -Body $pauseBody -ContentType "application/json" | ConvertTo-Json
+
+# Resume a paused trader
+$resumeBody = @{ isActive = $true } | ConvertTo-Json
+Invoke-RestMethod -Method PUT -Uri "$url/api/copy-trading/traders/$traderAddress" -Body $resumeBody -ContentType "application/json" | ConvertTo-Json
+
+# Remove a trader from tracking
+Invoke-RestMethod -Method DELETE -Uri "$url/api/copy-trading/traders/$traderAddress" | ConvertTo-Json
+
+# List all copy trading positions
+Invoke-RestMethod -Uri "$url/api/copy-trading/positions" | ConvertTo-Json -Depth 10
+
+# List only open positions
+Invoke-RestMethod -Uri "$url/api/copy-trading/positions?status=open" | ConvertTo-Json -Depth 10
+
+# Close a specific position
+$positionId = "position-id-here"
+Invoke-RestMethod -Method POST -Uri "$url/api/copy-trading/positions/$positionId/close" | ConvertTo-Json
+
+# List all copied trades
+Invoke-RestMethod -Uri "$url/api/copy-trading/trades" | ConvertTo-Json -Depth 10
+
+# List copied trades with filters
+Invoke-RestMethod -Uri "$url/api/copy-trading/trades?status=EXECUTED&limit=50" | ConvertTo-Json -Depth 10
+
+# Get copy trading statistics
+Invoke-RestMethod -Uri "$url/api/copy-trading/stats" | ConvertTo-Json -Depth 10
+
+# ============================================================================
+# HEALTH MONITORING
+# ============================================================================
+
+# Get comprehensive health status
+Invoke-RestMethod -Uri "$url/api/health" | ConvertTo-Json -Depth 10
+
+# Get detailed health with all checks
+Invoke-RestMethod -Uri "$url/api/health/detailed" | ConvertTo-Json -Depth 10
+
+# ============================================================================
+# SESSION RECORDING (PowerShell Scripts)
+# ============================================================================
+
+# Start a new trading session
+.\record-session.ps1 start
+
+# Check current session status (live metrics)
+.\record-session.ps1 status
+
+# End session and save results
+.\record-session.ps1 end
+
+# View all past sessions
+.\record-session.ps1 list
+
+# Get summary stats across all sessions
+.\record-session.ps1 summary
+
+# Export all sessions to JSON
+.\record-session.ps1 export
+
+# ============================================================================
+# QUICK START WORKFLOW
+# ============================================================================
+#
+# 1. CHECK SYSTEM HEALTH
+#    Invoke-RestMethod -Uri "$url/api/health" | ConvertTo-Json
+#
+# 2. CHECK BALANCES
+#    Invoke-RestMethod -Uri "$url/api/balances" | ConvertTo-Json
+#
+# 3. DISCOVER TRADERS (find profitable traders to copy)
+#    Invoke-RestMethod -Uri "$url/api/trader-discovery/top?count=10" | ConvertTo-Json -Depth 10
+#
+# 4. ANALYZE A TRADER (get detailed performance metrics)
+#    Invoke-RestMethod -Uri "$url/api/trader-discovery/analyze/0xTRADER_ADDRESS" | ConvertTo-Json -Depth 10
+#
+# 5. SIMULATE COPY TRADING (backtest before committing real funds)
+#    $sim = @{ traderAddress="0xADDRESS"; startingCapital=1000; sizingStrategy="PERCENTAGE"; multiplier=0.5; maxPositionSize=100 } | ConvertTo-Json
+#    Invoke-RestMethod -Method POST -Uri "$url/api/trader-discovery/simulate" -Body $sim -ContentType "application/json" | ConvertTo-Json -Depth 10
+#
+# 6. ADD TRADER TO COPY (if simulation looks good)
+#    $trader = @{ address="0xADDRESS"; name="Trader1"; sizingStrategy="PERCENTAGE"; multiplier=0.5; maxPositionSize=100 } | ConvertTo-Json
+#    Invoke-RestMethod -Method POST -Uri "$url/api/copy-trading/traders" -Body $trader -ContentType "application/json"
+#
+# 7. START COPY TRADING
+#    Invoke-RestMethod -Method POST -Uri "$url/api/copy-trading/start"
+#
+# 8. MONITOR POSITIONS
+#    Invoke-RestMethod -Uri "$url/api/copy-trading/positions" | ConvertTo-Json -Depth 10
+#
+# 9. CHECK STATS
+#    Invoke-RestMethod -Uri "$url/api/copy-trading/stats" | ConvertTo-Json -Depth 10
+
+# ============================================================================
+# SIZING STRATEGY REFERENCE
+# ============================================================================
+#
+# PERCENTAGE - Copy a percentage of the trader's position size
+#   - multiplier: 0.5 means copy 50% of their size
+#   - Good for: Scaling with the trader proportionally
+#
+# FIXED - Use a fixed dollar amount per trade
+#   - fixedAmount: Always use this exact amount (e.g., $10)
+#   - Good for: Consistent position sizes regardless of trader's size
+#
+# ADAPTIVE - Automatically adjusts based on recent performance
+#   - Increases size after winning trades
+#   - Decreases size after losing trades
+#   - Good for: Dynamic risk management
+#
+# TIERED MULTIPLIERS - Different multipliers based on trade size
+#   - Small trades (<$50): Use 1.5x multiplier
+#   - Medium trades ($50-$200): Use 1.0x multiplier
+#   - Large trades (>$200): Use 0.5x multiplier
+#   - Good for: Risk management on large trades
+
+# ============================================================================
+# RANKING PRESETS REFERENCE
+# ============================================================================
+#
+# conservative - High win rate & consistency requirements
+#   - Min trades: 20, Min win rate: 55%, Max drawdown: 40%
+#   - Good for: Lower risk, steady returns
+#
+# aggressive - Prioritizes ROI, relaxed filters
+#   - Min trades: 5, Min win rate: 40%, Max drawdown: 100%
+#   - Good for: Higher risk, higher potential returns
+#
+# balanced - Default balanced approach
+#   - Min trades: 10, Min win rate: 45%, Max drawdown: 80%
+#   - Good for: General use
+#
+# highVolume - For traders with significant volume
+#   - Min trades: 50, Min volume: $10,000
+#   - Good for: Finding active, liquid traders
+
+# ============================================================================
+# ENVIRONMENT VARIABLES REFERENCE
+# ============================================================================
+#
+# To enable copy trading, set in .env:
+#   COPY_TRADING_ENABLED=true
+#
+# To enable trader discovery, set in .env:
+#   TRADER_DISCOVERY_ENABLED=true
+#
+# To enable health file logging, set in .env:
+#   HEALTH_FILE_LOGGING_ENABLED=true
+#   HEALTH_LOG_DIRECTORY=./logs

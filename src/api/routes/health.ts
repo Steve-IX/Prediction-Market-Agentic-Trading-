@@ -93,8 +93,19 @@ export function createHealthRouter(deps: HealthCheckDependencies): Router {
         }
       }
 
-      // Database health (if available)
-      // TODO: Add database health check
+      try {
+        const { checkHealth: checkDbHealth } = await import('../../database/index.js');
+        const dbHealth = await checkDbHealth();
+        health.components['database'] = {
+          status: dbHealth.connected ? 'healthy' : 'unhealthy',
+          latencyMs: dbHealth.latencyMs,
+        };
+        if (!dbHealth.connected) {
+          health.status = health.status === 'healthy' ? 'degraded' : health.status;
+        }
+      } catch {
+        health.components['database'] = { status: 'unavailable' };
+      }
 
       const statusCode = health.status === 'healthy' ? 200 : health.status === 'degraded' ? 200 : 503;
       res.status(statusCode).json(health);

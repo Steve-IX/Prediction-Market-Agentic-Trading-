@@ -16,6 +16,7 @@ import {
   ExposureTracker,
   type KillSwitch,
 } from '../../risk/index.js';
+import { persistOrder, persistTrade, persistPosition } from '../../database/persistence.js';
 
 /**
  * Order Manager
@@ -52,10 +53,17 @@ export class OrderManager extends EventEmitter {
       });
 
       // Forward events from paper engine
-      this.paperEngine.on('fill', (data) => this.emit('fill', data));
-      this.paperEngine.on('trade', (data) => this.emit('trade', data));
+      this.paperEngine.on('fill', (data: { order: NormalizedOrder }) => {
+        void persistOrder(data.order);
+        this.emit('fill', data);
+      });
+      this.paperEngine.on('trade', (trade: Trade) => {
+        void persistTrade(trade, trade.orderId);
+        this.emit('trade', trade);
+      });
       this.paperEngine.on('positionUpdate', (data) => {
         this.positionLimits.updatePosition(data);
+        void persistPosition(data);
         this.emit('positionUpdate', data);
       });
 
@@ -172,7 +180,9 @@ export class OrderManager extends EventEmitter {
         }
       }
 
-      return this.paperEngine.placeOrder(order, orderBook);
+      const result = await this.paperEngine.placeOrder(order, orderBook);
+      void persistOrder(result);
+      return result;
     }
 
     // Live trading
@@ -185,7 +195,9 @@ export class OrderManager extends EventEmitter {
       throw new Error(`Client not connected for platform: ${order.platform}`);
     }
 
-    return client.placeOrder(order);
+    const result = await client.placeOrder(order);
+    void persistOrder(result);
+    return result;
   }
 
   /**

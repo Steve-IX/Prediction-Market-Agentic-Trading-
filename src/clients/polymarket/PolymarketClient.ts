@@ -19,6 +19,7 @@ import type { GammaEvent, GammaMarket, SignatureType } from './types.js';
 import { logger, type Logger } from '../../utils/logger.js';
 import { retry } from '../../utils/retry.js';
 import { startTimer, observeApiLatency, recordApiRequest, apiErrors } from '../../utils/metrics.js';
+import { getPolymarketDataApiClient } from './DataApiClient.js';
 
 /**
  * Polymarket client implementation
@@ -337,15 +338,11 @@ export class PolymarketClient implements IPlatformClient {
         apiKey: apiCreds.key.substring(0, 8) + '...',
       });
 
-      // ⚠️ TEMPORARY: Log full credentials for user to save
-      // TODO: Remove this after saving credentials to environment variables
-      this.log.warn('🔑 SAVE THESE AUTO-DERIVED CREDENTIALS TO YOUR .ENV FILE:', {
-        POLYMARKET_API_KEY: apiCreds.key,
-        POLYMARKET_API_SECRET: apiCreds.secret,
-        POLYMARKET_API_PASSPHRASE: apiCreds.passphrase,
-        note: 'Add these to your environment variables to avoid auto-deriving on every startup',
-        warning: 'These credentials are sensitive - do not share them publicly',
-      });
+      if (!this.config.apiKey || !this.config.apiSecret || !this.config.apiPassphrase) {
+        this.log.warn(
+          'Polymarket API credentials were auto-derived. Set POLYMARKET_API_KEY, POLYMARKET_API_SECRET, and POLYMARKET_API_PASSPHRASE in .env to avoid deriving on every startup.'
+        );
+      }
 
       // Initialize trading client with credentials
       // For PROXY (type 1) and GNOSIS (type 2), pass funderAddress to set maker = proxy wallet
@@ -931,16 +928,34 @@ export class PolymarketClient implements IPlatformClient {
     const timer = startTimer();
 
     try {
-      // Polymarket doesn't have a direct positions endpoint in the CLOB SDK
-      // Positions are typically tracked from trades or through the Gamma API
-      // For now, return empty array - paper trading manages its own positions
-      this.log.debug('Positions endpoint not available in CLOB SDK, returning empty array');
+      const walletAddress = this.config.funderAddress ?? this.signer?.address;
+      if (!walletAddress) {
+        return [];
+      }
+
+      const dataPositions = await getPolymarketDataApiClient().getPositions(walletAddress);
+      const positions: Position[] = dataPositions
+        .filter((p) => Math.abs(p.size) > 0)
+        .map((p) => ({
+          id: `${this.platform}:${p.conditionId}:${p.asset}`,
+          platform: this.platform,
+          marketId: p.conditionId,
+          outcomeId: p.asset,
+          outcomeName: p.outcome,
+          side: p.size >= 0 ? 'long' : 'short',
+          size: Math.abs(p.size),
+          avgEntryPrice: p.avgPrice,
+          currentPrice: p.avgPrice,
+          unrealizedPnl: 0,
+          realizedPnl: 0,
+          isOpen: true,
+        }));
 
       const durationMs = timer();
       observeApiLatency(this.platform, 'getPositions', durationMs);
       recordApiRequest(this.platform, 'getPositions', 'success');
 
-      return [];
+      return positions;
     } catch (error) {
       const durationMs = timer();
       observeApiLatency(this.platform, 'getPositions', durationMs);

@@ -1,5 +1,7 @@
 # Project Completion Report
 
+> **Note (2026-05):** Runtime Postgres persistence, API auth, live price polling, and strategy API wiring were added. Items marked below as incomplete reflect remaining gaps (strategy backtest CLI, news reactor).
+
 ## ✅ COMPLETED COMPONENTS
 
 ### 1. Project Structure ✅

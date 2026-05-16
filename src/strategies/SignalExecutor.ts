@@ -108,21 +108,25 @@ export class SignalExecutor extends EventEmitter {
       const executionTimeMs = Date.now() - startTime;
 
       // Calculate results
+      const filledSize = Number(order.filledSize) || 0;
+      const success = filledSize > 0;
+
       const result: SignalExecutionResult = {
         signal,
-        success: true,
+        success,
         orderId: order.id,
-        filledSize: order.filledSize,
+        filledSize,
         filledPrice: order.avgFillPrice || signal.price,
-        fee: 0, // Fee calculated separately
-        profit: 0, // Will be calculated when position closes
+        fee: 0,
+        profit: 0,
         executionTimeMs,
+        ...(success ? {} : { error: 'Order placed but not filled (resting GTC)' }),
       };
 
-      this.log.info('Signal executed successfully', {
+      this.log.info(success ? 'Signal executed successfully' : 'Signal order resting unfilled', {
         id: signal.id,
         orderId: order.id,
-        filledSize: order.filledSize,
+        filledSize,
         executionTimeMs,
       });
 
@@ -160,9 +164,9 @@ export class SignalExecutor extends EventEmitter {
     });
 
     const orders = [];
+    const placedOrderIds: string[] = [];
     let totalFilledSize = 0;
     let totalCost = 0;
-    let allSuccessful = true;
 
     // Execute all orders in the batch (as fast as possible)
     for (const batchOrder of batchOrders) {
@@ -186,6 +190,7 @@ export class SignalExecutor extends EventEmitter {
         });
 
         orders.push(order);
+        placedOrderIds.push(order.id);
         totalFilledSize += order.filledSize;
         totalCost += order.filledSize * (order.avgFillPrice || batchOrder.price);
       } catch (error) {
@@ -193,16 +198,36 @@ export class SignalExecutor extends EventEmitter {
           outcomeId: batchOrder.outcomeId,
           error: error instanceof Error ? error.message : String(error),
         });
-        allSuccessful = false;
+        for (const orderId of placedOrderIds) {
+          try {
+            await this.orderManager.cancelOrder(orderId, signal.market.platform);
+          } catch {
+            /* best-effort rollback */
+          }
+        }
+        return this.createFailedResult(
+          signal,
+          `Batch execution failed after ${orders.length}/${batchOrders.length} legs`,
+          startTime
+        );
       }
     }
 
     const executionTimeMs = Date.now() - startTime;
 
-    if (!allSuccessful || orders.length === 0) {
+    if (orders.length !== batchOrders.length) {
       return this.createFailedResult(
         signal,
-        `Batch execution incomplete: ${orders.length}/${batchOrders.length} orders succeeded`,
+        `Batch execution incomplete: ${orders.length}/${batchOrders.length} orders placed`,
+        startTime
+      );
+    }
+
+    const batchFilled = orders.every((o) => Number(o.filledSize) > 0);
+    if (!batchFilled) {
+      return this.createFailedResult(
+        signal,
+        'Batch orders placed but not all legs filled',
         startTime
       );
     }

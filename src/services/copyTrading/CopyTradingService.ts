@@ -761,10 +761,52 @@ export class CopyTradingService extends EventEmitter {
     pnl?: number;
     copiedAt: Date;
   }>> {
-    // This would normally fetch from database
-    // For now, return empty array - trades are tracked via events
-    // TODO: Implement database persistence for copied trades
-    return [];
+    try {
+      const { getRepositories } = await import('../../database/repositories/index.js');
+      const { isPersistenceEnabled: persistenceOn } = await import('../../database/persistence.js');
+      if (!persistenceOn()) {
+        return [];
+      }
+      const traderAddress = _filter.traderAddress?.toLowerCase();
+      if (!traderAddress) {
+        return [];
+      }
+      const trader = this.trackedTraders.get(traderAddress);
+      const traderDbId = trader?.id ?? traderAddress;
+      const rows = await getRepositories().copyTrading.listByTrader(traderDbId, _filter.limit ?? 200);
+      return rows.map((row) => {
+        const entry: {
+          id: string;
+          traderAddress: string;
+          marketId: string;
+          outcomeId: string;
+          side: 'BUY' | 'SELL';
+          originalSize: number;
+          copiedSize: number;
+          price: number;
+          status: string;
+          orderId?: string;
+          copiedAt: Date;
+        } = {
+          id: row.id,
+          traderAddress,
+          marketId: row.originalMarketId,
+          outcomeId: row.originalOutcomeId,
+          side: row.originalSide as 'BUY' | 'SELL',
+          originalSize: Number(row.originalSize),
+          copiedSize: row.copiedSize ? Number(row.copiedSize) : 0,
+          price: row.originalPrice ? Number(row.originalPrice) : 0,
+          status: row.status,
+          copiedAt: row.copiedTimestamp ?? row.originalTimestamp,
+        };
+        if (row.copiedOrderId) {
+          entry.orderId = row.copiedOrderId;
+        }
+        return entry;
+      });
+    } catch {
+      return [];
+    }
   }
 
   /**

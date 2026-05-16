@@ -11,7 +11,8 @@ import { TraderDiscoveryService } from './services/traderDiscovery/TraderDiscove
 import { HealthMonitorService } from './services/healthMonitor/HealthMonitorService.js';
 import { getMetrics, getContentType } from './utils/metrics.js';
 import type { AccountBalance } from './clients/shared/interfaces.js';
-import express from 'express';
+import { createApp } from './app/createApp.js';
+import { requireApiSecret } from './api/middleware/requireApiSecret.js';
 
 const log = logger('Main');
 
@@ -44,7 +45,9 @@ async function main(): Promise<void> {
     log.info('Database initialized');
   } catch (error) {
     log.error('Database initialization failed', { error });
-    // Continue in demo mode without database
+    if (config.env === 'production') {
+      throw error;
+    }
   }
 
   // Initialize clients
@@ -162,12 +165,11 @@ async function main(): Promise<void> {
   }
 
   // Start API server
-  const app = express();
-  app.use(express.json());
+  const app = createApp();
 
   // Add metrics endpoint to main API server (for Railway compatibility)
   if (config.api.enableMetrics) {
-    app.get('/metrics', async (_req, res) => {
+    app.get('/metrics', requireApiSecret, async (_req, res) => {
       try {
         const metrics = await getMetrics();
         res.set('Content-Type', getContentType());
@@ -201,7 +203,7 @@ async function main(): Promise<void> {
 
   app.use('/api/trades', createTradesRouter(orderManager));
   app.use('/api/orders', createOrdersRouter(orderManager));
-  app.use('/api/strategies', createStrategiesRouter(strategyRegistry));
+  app.use('/api/strategies', createStrategiesRouter(strategyRegistry, tradingEngine));
 
   // Copy Trading routes (if service is initialized)
   if (copyTradingService) {
@@ -363,7 +365,7 @@ async function main(): Promise<void> {
   });
 
   // Start trading
-  app.post('/api/trading/start', async (_req, res) => {
+  app.post('/api/trading/start', requireApiSecret, async (_req, res) => {
     if (!tradingEngine) {
       return res.status(404).json({ error: 'Trading engine not initialized' });
     }
@@ -388,7 +390,7 @@ async function main(): Promise<void> {
   });
 
   // Stop trading
-  app.post('/api/trading/stop', async (_req, res) => {
+  app.post('/api/trading/stop', requireApiSecret, async (_req, res) => {
     if (!tradingEngine) {
       return res.status(404).json({ error: 'Trading engine not initialized' });
     }
@@ -413,7 +415,7 @@ async function main(): Promise<void> {
   });
 
   // Manually trigger a scan for opportunities
-  app.post('/api/trading/scan', async (_req, res) => {
+  app.post('/api/trading/scan', requireApiSecret, async (_req, res) => {
     if (!tradingEngine) {
       return res.status(404).json({ error: 'Trading engine not initialized' });
     }
@@ -483,17 +485,19 @@ async function main(): Promise<void> {
   });
 
   // Kill switch endpoint
-  app.post('/api/kill-switch', async (_req, res) => {
+  app.post('/api/kill-switch', requireApiSecret, async (req, res) => {
     log.warn('Kill switch triggered via API');
 
     try {
-      // Stop trading engine
-      if (tradingEngine) {
-        await tradingEngine.stop();
-      }
+      const reason =
+        typeof req.body?.reason === 'string' ? req.body.reason : 'Manual activation via API';
 
-      // Cancel all orders
-      await orderManager.cancelAllOrders();
+      if (tradingEngine) {
+        await tradingEngine.activateKillSwitch(reason);
+        await tradingEngine.stop();
+      } else {
+        await orderManager.cancelAllOrders();
+      }
 
       res.json({ status: 'kill_switch_activated', timestamp: new Date().toISOString() });
     } catch (error) {
@@ -503,6 +507,15 @@ async function main(): Promise<void> {
       });
     }
   });
+
+  if (config.trading.autoStartTrading && tradingEngine) {
+    try {
+      await tradingEngine.start();
+      log.info('Trading engine auto-started (AUTO_START_TRADING=true)');
+    } catch (error) {
+      log.error('Failed to auto-start trading engine', { error });
+    }
+  }
 
   app.listen(config.api.port, () => {
     log.info(`API server listening on port ${config.api.port}`);

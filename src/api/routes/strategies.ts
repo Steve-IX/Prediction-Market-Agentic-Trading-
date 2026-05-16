@@ -1,17 +1,26 @@
 import { Router, type Request, type Response } from 'express';
 import type { StrategyRegistry } from '../../strategies/index.js';
+import type { TradingEngine } from '../../tradingEngine.js';
+import { getStrategyApiEntries } from '../../strategies/strategyApiAdapter.js';
 
-export function createStrategiesRouter(strategyRegistry: StrategyRegistry): Router {
+export function createStrategiesRouter(
+  strategyRegistry: StrategyRegistry,
+  tradingEngine?: TradingEngine | null
+): Router {
   const router = Router();
 
-  /**
-   * GET /api/strategies
-   * List all strategies
-   */
   router.get('/', async (_req: Request, res: Response) => {
     try {
-      const strategies = strategyRegistry.getAll();
+      if (tradingEngine) {
+        const strategies = getStrategyApiEntries(
+          tradingEngine.getStrategyManager(),
+          tradingEngine
+        );
+        res.json({ count: strategies.length, strategies, source: 'strategy-manager' });
+        return;
+      }
 
+      const strategies = strategyRegistry.getAll();
       res.json({
         count: strategies.length,
         strategies: strategies.map((s) => {
@@ -29,6 +38,7 @@ export function createStrategiesRouter(strategyRegistry: StrategyRegistry): Rout
             lastError: state.lastError,
           };
         }),
+        source: 'legacy-registry',
       });
     } catch (error) {
       res.status(500).json({
@@ -38,10 +48,6 @@ export function createStrategiesRouter(strategyRegistry: StrategyRegistry): Rout
     }
   });
 
-  /**
-   * GET /api/strategies/:id
-   * Get strategy details
-   */
   router.get('/:id', async (req: Request, res: Response) => {
     try {
       const strategyId = req.params['id'];
@@ -49,8 +55,21 @@ export function createStrategiesRouter(strategyRegistry: StrategyRegistry): Rout
         res.status(400).json({ error: 'Strategy ID is required' });
         return;
       }
-      const strategy = strategyRegistry.get(strategyId);
 
+      if (tradingEngine) {
+        const entry = getStrategyApiEntries(
+          tradingEngine.getStrategyManager(),
+          tradingEngine
+        ).find((s) => s.id === strategyId);
+        if (!entry) {
+          res.status(404).json({ error: 'Strategy not found' });
+          return;
+        }
+        res.json({ ...entry, engineState: tradingEngine.getState() });
+        return;
+      }
+
+      const strategy = strategyRegistry.get(strategyId);
       if (!strategy) {
         res.status(404).json({ error: 'Strategy not found' });
         return;
@@ -58,17 +77,11 @@ export function createStrategiesRouter(strategyRegistry: StrategyRegistry): Rout
 
       const state = strategy.getState();
       const config = strategy.getConfig();
-      const configId = config['id'];
-      if (!configId) {
-        res.status(500).json({ error: 'Strategy ID is missing' });
-        return;
-      }
-
       res.json({
-        id: configId,
+        id: config.id,
         name: config.name,
         enabled: config.enabled,
-        config: config,
+        config,
         state: {
           isRunning: state.isRunning,
           ordersPlaced: state.ordersPlaced,
@@ -81,88 +94,6 @@ export function createStrategiesRouter(strategyRegistry: StrategyRegistry): Rout
     } catch (error) {
       res.status(500).json({
         error: 'Failed to fetch strategy',
-        message: error instanceof Error ? error.message : String(error),
-      });
-    }
-  });
-
-  /**
-   * POST /api/strategies/:id/start
-   * Start a strategy
-   */
-  router.post('/:id/start', async (req: Request, res: Response) => {
-    try {
-      const strategyId = req.params['id'];
-      if (!strategyId) {
-        res.status(400).json({ error: 'Strategy ID is required' });
-        return;
-      }
-      const strategy = strategyRegistry.get(strategyId);
-
-      if (!strategy) {
-        res.status(404).json({ error: 'Strategy not found' });
-        return;
-      }
-
-      const state = strategy.getState();
-      if (state.isRunning) {
-        res.status(400).json({ error: 'Strategy is already running' });
-        return;
-      }
-
-      await strategy.start();
-
-      res.json({
-        status: 'started',
-        strategy: {
-          id: strategyId,
-          state: strategy.getState(),
-        },
-      });
-    } catch (error) {
-      res.status(500).json({
-        error: 'Failed to start strategy',
-        message: error instanceof Error ? error.message : String(error),
-      });
-    }
-  });
-
-  /**
-   * POST /api/strategies/:id/stop
-   * Stop a strategy
-   */
-  router.post('/:id/stop', async (req: Request, res: Response) => {
-    try {
-      const strategyId = req.params['id'];
-      if (!strategyId) {
-        res.status(400).json({ error: 'Strategy ID is required' });
-        return;
-      }
-      const strategy = strategyRegistry.get(strategyId);
-
-      if (!strategy) {
-        res.status(404).json({ error: 'Strategy not found' });
-        return;
-      }
-
-      const state = strategy.getState();
-      if (!state.isRunning) {
-        res.status(400).json({ error: 'Strategy is not running' });
-        return;
-      }
-
-      await strategy.stop();
-
-      res.json({
-        status: 'stopped',
-        strategy: {
-          id: strategyId,
-          state: strategy.getState(),
-        },
-      });
-    } catch (error) {
-      res.status(500).json({
-        error: 'Failed to stop strategy',
         message: error instanceof Error ? error.message : String(error),
       });
     }

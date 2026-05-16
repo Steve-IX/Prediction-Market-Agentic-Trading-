@@ -97,10 +97,20 @@ export async function checkHealth(): Promise<{ connected: boolean; latencyMs: nu
  * Note: In production, use drizzle-kit migrate instead
  */
 export async function initializeDb(): Promise<void> {
-  getDb(); // Ensure connection is initialized
+  const config = getConfig();
+  const hasDatabaseUrl = Boolean(process.env['DATABASE_URL']);
+
+  if (!hasDatabaseUrl) {
+    if (config.env === 'production') {
+      throw new Error('DATABASE_URL is required in production');
+    }
+    log.warn('DATABASE_URL not set — running without persistence');
+    return;
+  }
+
+  getDb();
 
   try {
-    // Check if tables exist
     const result = await rawQuery<{ exists: boolean }[]>(`
       SELECT EXISTS (
         SELECT FROM information_schema.tables
@@ -110,13 +120,22 @@ export async function initializeDb(): Promise<void> {
     `);
 
     if (!result[0]?.exists) {
-      log.warn('Database tables do not exist. Run migrations with: pnpm db:push');
+      const msg = 'Database tables do not exist. Run: pnpm db:push';
+      if (config.env === 'production') {
+        throw new Error(msg);
+      }
+      log.warn(msg);
     } else {
       log.info('Database tables verified');
+      const { setPersistenceEnabled } = await import('./persistence.js');
+      setPersistenceEnabled(true);
     }
   } catch (error) {
     log.error('Failed to initialize database', { error });
-    throw error;
+    if (config.env === 'production') {
+      throw error;
+    }
+    log.warn('Continuing without database in non-production environment');
   }
 }
 

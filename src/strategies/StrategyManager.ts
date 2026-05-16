@@ -183,15 +183,6 @@ export class StrategyManager extends EventEmitter {
       }
     }
 
-    // If we found prediction strategy signals, return early (prioritize them)
-    if (signals.length > 0) {
-      const filteredSignals = this.filterSignals(signals);
-      if (filteredSignals.length > 0) {
-        this.setCooldown(market.externalId);
-      }
-      return filteredSignals;
-    }
-
     // === TECHNICAL ANALYSIS STRATEGIES (need price history) ===
     // Only run these if we have price history (faster - skip markets without data)
     
@@ -409,6 +400,7 @@ export class StrategyManager extends EventEmitter {
     this.meanReversionStrategy.clearSignal(signal.marketId);
     this.orderbookImbalanceStrategy.clearSignal(signal.marketId);
     this.volatilityCaptureStrategy.clearSignal(signal.marketId);
+    this.spreadHunterStrategy.clearSignal(signal.marketId);
     // Set post-trade cooldown to prevent churning (buy/sell same market repeatedly)
     this.setCooldown(signal.marketId, this.config.postTradeCooldownMs);
     this.log.info('Post-trade cooldown set', {
@@ -422,6 +414,18 @@ export class StrategyManager extends EventEmitter {
    */
   getPriceStats(marketId: string): PriceStats | null {
     return this.priceTracker.getStats(marketId, 60);
+  }
+
+  getActiveSignalCounts(): Record<string, number> {
+    return {
+      momentum: this.momentumStrategy.getActiveSignals().length,
+      'mean-reversion': this.meanReversionStrategy.getActiveSignals().length,
+      'orderbook-imbalance': this.orderbookImbalanceStrategy.getActiveSignals().length,
+      'spread-hunter': this.spreadHunterStrategy.getActiveSignals().length,
+      'volatility-capture': this.volatilityCaptureStrategy.getActiveSignals().length,
+      'probability-sum': this.probabilitySumStrategy.getActiveSignals().length,
+      endgame: this.endgameStrategy.getActiveSignals().length,
+    };
   }
 
   /**

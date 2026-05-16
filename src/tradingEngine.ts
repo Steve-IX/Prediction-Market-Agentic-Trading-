@@ -17,6 +17,7 @@ import { StrategyManager } from './strategies/StrategyManager.js';
 import { SignalExecutor, type SignalExecutionResult } from './strategies/SignalExecutor.js';
 import type { TradingSignal } from './strategies/momentum/MomentumStrategy.js';
 import { KillSwitch } from './risk/KillSwitch.js';
+import { DrawdownMonitor } from './risk/drawdownMonitor.js';
 import { PricePoller, type PolledPriceUpdate } from './services/pricePoller/PricePoller.js';
 import { logger, type Logger } from './utils/logger.js';
 import { arbitrageOpportunities, arbitrageExecutions, arbitrageProfit } from './utils/metrics.js';
@@ -103,6 +104,9 @@ export class TradingEngine extends EventEmitter {
 
   // Risk
   private killSwitch: KillSwitch;
+  private drawdownMonitor: DrawdownMonitor;
+  private marketRefreshInterval: NodeJS.Timeout | null = null;
+  private activeSessionId: string | null = null;
 
   // Price polling
   private pricePoller: PricePoller;
@@ -161,6 +165,7 @@ export class TradingEngine extends EventEmitter {
       enableMeanReversion: this.appConfig.features.enableMeanReversionStrategy,
       enableOrderbookImbalance: this.appConfig.features.enableOrderbookImbalanceStrategy,
       enableSpreadHunter: this.appConfig.features.enableSpreadHunterStrategy ?? true,
+      enableVolatilityCapture: this.appConfig.features.enableVolatilityCaptureStrategy ?? false,
       enableProbabilitySum: this.appConfig.features.enableProbabilitySumStrategy ?? true,
       enableEndgame: this.appConfig.features.enableEndgameStrategy ?? true,
       signalCooldownMs: this.appConfig.strategies.signalCooldownMs,
@@ -214,13 +219,19 @@ export class TradingEngine extends EventEmitter {
 
     // Create risk management
     this.killSwitch = new KillSwitch(this.orderManager);
+    this.orderManager.setKillSwitch(this.killSwitch);
+    this.drawdownMonitor = new DrawdownMonitor();
+    this.drawdownMonitor.setKillSwitch(this.killSwitch);
 
     // Create price poller for active price data
     // Now polls ALL active markets (not just top 200)
-    this.pricePoller = new PricePoller({
-      intervalMs: 30000, // Poll every 30 seconds (all markets)
-      maxMarkets: 10000, // Track ALL active markets
-    });
+    this.pricePoller = new PricePoller(
+      { polymarket: this.polymarketClient, kalshi: this.kalshiClient },
+      {
+        intervalMs: this.appConfig.trading.pricePollIntervalMs,
+        maxMarkets: 10000,
+      }
+    );
 
     this.setupEventListeners();
   }
@@ -320,12 +331,42 @@ export class TradingEngine extends EventEmitter {
       marketsToTrack: this.pricePoller.getStats().trackedMarkets,
     });
 
+    this.drawdownMonitor.start();
+
+    const refreshMs = this.appConfig.trading.marketRefreshIntervalMs;
+    if (refreshMs > 0) {
+      this.marketRefreshInterval = setInterval(() => {
+        void this.refreshMarkets().catch((error) => {
+          this.log.warn('Periodic market refresh failed', {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        });
+      }, refreshMs);
+    }
+
     // Start polling interval as fallback
     if (this.config.scanIntervalMs > 0) {
       this.pollingInterval = setInterval(
         () => this.scanForOpportunities(),
         this.config.scanIntervalMs
       );
+    }
+
+    try {
+      const { isPersistenceEnabled } = await import('./database/persistence.js');
+      if (isPersistenceEnabled()) {
+        const { getRepositories } = await import('./database/repositories/index.js');
+        const { isPaperTrading } = await import('./config/index.js');
+        const balance = await this.orderManager.getBalance(
+          this.polymarketClient.platform
+        );
+        this.activeSessionId = await getRepositories().sessions.startSession(
+          balance.total,
+          isPaperTrading() ? 'paper' : 'live'
+        );
+      }
+    } catch (error) {
+      this.log.warn('Failed to start DB session record', { error });
     }
 
     this.emit('started');
@@ -348,6 +389,26 @@ export class TradingEngine extends EventEmitter {
     this.log.info('Stopping trading engine...');
     this.state.isRunning = false;
 
+    if (this.activeSessionId) {
+      try {
+        const { isPersistenceEnabled } = await import('./database/persistence.js');
+        if (isPersistenceEnabled()) {
+          const { getRepositories } = await import('./database/repositories/index.js');
+          const balance = await this.orderManager.getBalance(
+            this.polymarketClient.platform
+          );
+          await getRepositories().sessions.endSession(this.activeSessionId, {
+            endBalance: balance.total,
+            netPnl: 0,
+            tradesExecuted: this.state.opportunitiesDetected,
+          });
+        }
+      } catch (error) {
+        this.log.warn('Failed to end DB session record', { error });
+      }
+      this.activeSessionId = null;
+    }
+
     // Stop polling
     if (this.pollingInterval) {
       clearInterval(this.pollingInterval);
@@ -359,6 +420,12 @@ export class TradingEngine extends EventEmitter {
 
     // Stop kill switch monitoring
     this.killSwitch.stop();
+    this.drawdownMonitor.stop();
+
+    if (this.marketRefreshInterval) {
+      clearInterval(this.marketRefreshInterval);
+      this.marketRefreshInterval = null;
+    }
 
     // Disconnect market data service
     await this.marketDataService.disconnect();
@@ -381,6 +448,21 @@ export class TradingEngine extends EventEmitter {
    */
   getState(): TradingEngineState {
     return { ...this.state };
+  }
+
+  /**
+   * Activate kill switch (blocks new orders via OrderManager)
+   */
+  async activateKillSwitch(reason: string): Promise<void> {
+    await this.killSwitch.activateManual(reason);
+  }
+
+  getKillSwitch(): KillSwitch {
+    return this.killSwitch;
+  }
+
+  getStrategyManager(): StrategyManager {
+    return this.strategyManager;
   }
 
   /**
@@ -620,6 +702,13 @@ export class TradingEngine extends EventEmitter {
         opportunities.push(...crossPlatformOpps);
       }
 
+      if (opportunities.length > 0) {
+        const { persistArbitrageOpportunity } = await import('./database/persistence.js');
+        for (const opp of opportunities) {
+          void persistArbitrageOpportunity(opp);
+        }
+      }
+
       // NEW: Run active trading strategies
       const polymarketMarkets = this.markets.get(PLATFORMS.POLYMARKET) ?? [];
       const activeMarkets = polymarketMarkets.filter(m => m.isActive);
@@ -816,6 +905,12 @@ export class TradingEngine extends EventEmitter {
       const allMarkets = [...polymarketMarkets, ...kalshiMarkets];
       this.pricePoller.updateTrackedMarkets(allMarkets);
 
+      const { isPersistenceEnabled } = await import('./database/persistence.js');
+      if (isPersistenceEnabled()) {
+        const { getRepositories } = await import('./database/repositories/index.js');
+        await getRepositories().markets.upsertBatch(allMarkets.slice(0, 500));
+      }
+
       this.log.info('Markets refreshed', {
         polymarket: polymarketMarkets.length,
         kalshi: kalshiMarkets.length,
@@ -852,7 +947,8 @@ export class TradingEngine extends EventEmitter {
     
     // Track up to 200 markets for price history (technical strategies need this)
     // But prediction strategies (ProbabilitySum, Endgame) work on ALL markets
-    const marketsToTrack = activePolymarketMarkets.slice(0, 200);
+    const maxWs = this.appConfig.trading.maxWsSubscriptions;
+    const marketsToTrack = activePolymarketMarkets.slice(0, maxWs);
     
     for (const market of marketsToTrack) {
       const outcomeIds = market.outcomes.map((o) => o.externalId);
@@ -862,7 +958,7 @@ export class TradingEngine extends EventEmitter {
     // Subscribe to Kalshi markets
     const kalshiMarkets = this.markets.get(PLATFORMS.KALSHI) ?? [];
     const activeKalshiMarkets = kalshiMarkets.filter(m => m.isActive);
-    const kalshiMarketsToTrack = activeKalshiMarkets.slice(0, 200);
+    const kalshiMarketsToTrack = activeKalshiMarkets.slice(0, maxWs);
     
     for (const market of kalshiMarketsToTrack) {
       const outcomeIds = market.outcomes.map((o) => o.externalId);

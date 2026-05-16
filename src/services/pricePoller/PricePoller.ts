@@ -1,23 +1,22 @@
 import { EventEmitter } from 'events';
+import type { PolymarketClient } from '../../clients/polymarket/PolymarketClient.js';
+import type { KalshiClient } from '../../clients/kalshi/KalshiClient.js';
 import type { NormalizedMarket } from '../../clients/shared/interfaces.js';
+import { PLATFORMS } from '../../config/constants.js';
 import { logger, type Logger } from '../../utils/logger.js';
 
-/**
- * Price Poller Configuration
- */
 export interface PricePollerConfig {
-  intervalMs: number; // Poll interval in milliseconds
-  maxMarkets: number; // Maximum number of markets to track
+  intervalMs: number;
+  maxMarkets: number;
+  batchSize: number;
 }
 
 const DEFAULT_CONFIG: PricePollerConfig = {
-  intervalMs: 30000, // 30 seconds (poll all markets less frequently)
-  maxMarkets: 10000, // Poll ALL active markets (increased from 200)
+  intervalMs: 30000,
+  maxMarkets: 10000,
+  batchSize: 500,
 };
 
-/**
- * Price update from polling
- */
 export interface PolledPriceUpdate {
   marketId: string;
   outcomeId: string;
@@ -26,31 +25,32 @@ export interface PolledPriceUpdate {
 }
 
 /**
- * Price Poller
- * Actively polls REST API for market prices to populate price history
- *
- * Why this is needed:
- * WebSockets only send updates when there's trading activity.
- * Most markets are quiet, so we need to actively fetch prices via REST API.
+ * Polls REST APIs for fresh market prices (supplements WebSocket data).
  */
 export class PricePoller extends EventEmitter {
   private log: Logger;
   private config: PricePollerConfig;
-  private isRunning: boolean = false;
+  private polymarketClient: PolymarketClient | null;
+  private kalshiClient: KalshiClient | null;
+  private isRunning = false;
+  private isPolling = false;
   private intervalHandle: NodeJS.Timeout | null = null;
   private trackedMarkets: Map<string, NormalizedMarket> = new Map();
-  private pollCount: number = 0;
-  private lastPollUpdates: number = 0;
+  private pollCount = 0;
+  private errorCount = 0;
+  private lastPollUpdates = 0;
 
-  constructor(config?: Partial<PricePollerConfig>) {
+  constructor(
+    clients: { polymarket?: PolymarketClient; kalshi?: KalshiClient },
+    config?: Partial<PricePollerConfig>
+  ) {
     super();
     this.log = logger('PricePoller');
     this.config = { ...DEFAULT_CONFIG, ...config };
+    this.polymarketClient = clients.polymarket ?? null;
+    this.kalshiClient = clients.kalshi ?? null;
   }
 
-  /**
-   * Start polling
-   */
   start(): void {
     if (this.isRunning) {
       this.log.warn('Price poller already running');
@@ -58,23 +58,19 @@ export class PricePoller extends EventEmitter {
     }
 
     this.isRunning = true;
+    void this.poll();
     this.intervalHandle = setInterval(() => {
-      this.poll().catch((error) => {
-        this.log.error('Error during poll', {
-          error: error instanceof Error ? error.message : String(error),
-        });
-      });
+      void this.poll();
     }, this.config.intervalMs);
 
     this.log.info('Price poller started', {
       intervalMs: this.config.intervalMs,
       maxMarkets: this.config.maxMarkets,
+      hasPolymarket: !!this.polymarketClient,
+      hasKalshi: !!this.kalshiClient,
     });
   }
 
-  /**
-   * Stop polling
-   */
   stop(): void {
     if (!this.isRunning) return;
 
@@ -86,89 +82,148 @@ export class PricePoller extends EventEmitter {
 
     this.log.info('Price poller stopped', {
       totalPolls: this.pollCount,
+      errors: this.errorCount,
       trackedMarkets: this.trackedMarkets.size,
     });
   }
 
-  /**
-   * Update tracked markets
-   * Now tracks ALL active markets (not just top N by volume)
-   */
   updateTrackedMarkets(markets: NormalizedMarket[]): void {
-    // Clear existing
     this.trackedMarkets.clear();
 
-    // Track ALL active binary markets (prediction strategies work on all markets)
     const activeMarkets = markets
       .filter((m) => m.isActive && m.outcomes.length === 2)
-      .slice(0, this.config.maxMarkets); // Limit only if exceeds maxMarkets
+      .slice(0, this.config.maxMarkets);
 
-    // Store in map
     for (const market of activeMarkets) {
-      this.trackedMarkets.set(market.externalId, market);
+      this.trackedMarkets.set(`${market.platform}:${market.externalId}`, market);
     }
 
-    this.log.info('Tracked markets updated', {
-      totalAvailable: markets.length,
-      activeBinaryMarkets: activeMarkets.length,
+    this.log.debug('Tracked markets updated', {
       nowTracking: this.trackedMarkets.size,
-      note: 'Tracking all active markets for prediction strategies',
     });
   }
 
-  /**
-   * Poll all tracked markets for current prices
-   */
   private async poll(): Promise<void> {
-    if (this.trackedMarkets.size === 0) {
-      return;
-    }
+    if (this.isPolling) return;
 
+    this.isPolling = true;
     this.pollCount++;
-    const updates: PolledPriceUpdate[] = [];
     const timestamp = new Date();
+    let updatesEmitted = 0;
 
-    // Emit price updates for each tracked market
-    for (const [marketId, market] of this.trackedMarkets) {
-      // For each outcome (YES/NO), emit price update
-      for (const outcome of market.outcomes) {
-        const price = outcome.bestAsk;
-        if (price && price > 0 && price < 1) {
-          const update: PolledPriceUpdate = {
-            marketId,
-            outcomeId: outcome.externalId,
-            price,
-            timestamp,
-          };
-          updates.push(update);
-
-          // Emit individual price update
-          this.emit('priceUpdate', update);
-        }
+    try {
+      if (this.polymarketClient?.isConnected()) {
+        updatesEmitted += await this.pollPolymarket(timestamp);
       }
-    }
 
-    this.lastPollUpdates = updates.length;
+      if (this.kalshiClient?.isConnected()) {
+        updatesEmitted += await this.pollKalshi(timestamp);
+      }
 
-    // Log summary periodically (every 6th poll = ~1 minute)
-    if (this.pollCount % 6 === 0) {
-      this.log.info('Price poller summary', {
-        pollCount: this.pollCount,
-        trackedMarkets: this.trackedMarkets.size,
-        lastPollUpdates: this.lastPollUpdates,
+      if (updatesEmitted === 0 && this.trackedMarkets.size > 0) {
+        updatesEmitted += this.emitFromCachedMarkets(timestamp);
+      }
+
+      this.lastPollUpdates = updatesEmitted;
+
+      if (this.pollCount % 6 === 0) {
+        this.log.info('Price poller summary', {
+          pollCount: this.pollCount,
+          trackedMarkets: this.trackedMarkets.size,
+          lastPollUpdates: updatesEmitted,
+          errors: this.errorCount,
+        });
+      }
+    } catch (error) {
+      this.errorCount++;
+      this.log.error('Poll failed', {
+        error: error instanceof Error ? error.message : String(error),
       });
+    } finally {
+      this.isPolling = false;
     }
   }
 
-  /**
-   * Get stats
-   */
+  private async pollPolymarket(timestamp: Date): Promise<number> {
+    const client = this.polymarketClient!;
+    const markets = await client.getMarkets({
+      activeOnly: true,
+      limit: Math.min(this.config.maxMarkets, this.config.batchSize),
+    });
+
+    let count = 0;
+    for (const market of markets) {
+      if (!market.isActive || market.outcomes.length !== 2) continue;
+
+      this.trackedMarkets.set(`${PLATFORMS.POLYMARKET}:${market.externalId}`, market);
+
+      const yesOutcome = market.outcomes.find((o) => o.type === 'yes');
+      if (yesOutcome?.bestAsk && yesOutcome.bestAsk > 0 && yesOutcome.bestAsk < 1) {
+        this.emit('priceUpdate', {
+          marketId: market.externalId,
+          outcomeId: yesOutcome.externalId,
+          price: yesOutcome.bestAsk,
+          timestamp,
+        } satisfies PolledPriceUpdate);
+        count++;
+      }
+    }
+    return count;
+  }
+
+  private async pollKalshi(timestamp: Date): Promise<number> {
+    const client = this.kalshiClient!;
+    const markets = await client.getMarkets({
+      activeOnly: true,
+      limit: Math.min(this.config.maxMarkets, this.config.batchSize),
+    });
+
+    let count = 0;
+    for (const market of markets) {
+      if (!market.isActive || market.outcomes.length !== 2) continue;
+
+      this.trackedMarkets.set(`${PLATFORMS.KALSHI}:${market.externalId}`, market);
+
+      const yesOutcome = market.outcomes.find((o) => o.type === 'yes');
+      if (yesOutcome?.bestAsk && yesOutcome.bestAsk > 0 && yesOutcome.bestAsk < 1) {
+        this.emit('priceUpdate', {
+          marketId: market.externalId,
+          outcomeId: yesOutcome.externalId,
+          price: yesOutcome.bestAsk,
+          timestamp,
+        } satisfies PolledPriceUpdate);
+        count++;
+      }
+    }
+    return count;
+  }
+
+  private emitFromCachedMarkets(timestamp: Date): number {
+    let count = 0;
+    for (const market of this.trackedMarkets.values()) {
+      for (const outcome of market.outcomes) {
+        const price = outcome.bestAsk;
+        if (price && price > 0 && price < 1) {
+          this.emit('priceUpdate', {
+            marketId: market.externalId,
+            outcomeId: outcome.externalId,
+            price,
+            timestamp,
+          } satisfies PolledPriceUpdate);
+          count++;
+        }
+      }
+    }
+    return count;
+  }
+
   getStats() {
     return {
       isRunning: this.isRunning,
       pollCount: this.pollCount,
       trackedMarkets: this.trackedMarkets.size,
       lastPollUpdates: this.lastPollUpdates,
+      errorCount: this.errorCount,
     };
   }
 }

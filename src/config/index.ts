@@ -146,6 +146,10 @@ function buildConfigFromEnv(): unknown {
       executionTimeoutMs: parseNumber(env['EXECUTION_TIMEOUT_MS'], 5000),
       orderRetryAttempts: parseNumber(env['ORDER_RETRY_ATTEMPTS'], 3),
       orderRetryDelayMs: parseNumber(env['ORDER_RETRY_DELAY_MS'], 1000),
+      marketRefreshIntervalMs: parseNumber(env['MARKET_REFRESH_INTERVAL_MS'], 600000),
+      pricePollIntervalMs: parseNumber(env['PRICE_POLL_INTERVAL_MS'], 30000),
+      maxWsSubscriptions: parseNumber(env['MAX_WS_SUBSCRIPTIONS'], 200),
+      autoStartTrading: parseBoolean(env['AUTO_START_TRADING'], false),
     },
 
     api: {
@@ -168,6 +172,7 @@ function buildConfigFromEnv(): unknown {
       // Prediction market-specific strategies (don't need price history)
       enableProbabilitySumStrategy: parseBoolean(env['ENABLE_PROBABILITY_SUM_STRATEGY'], true),
       enableEndgameStrategy: parseBoolean(env['ENABLE_ENDGAME_STRATEGY'], true),
+      enableVolatilityCaptureStrategy: parseBoolean(env['ENABLE_VOLATILITY_CAPTURE_STRATEGY'], false),
     },
 
     strategies: {

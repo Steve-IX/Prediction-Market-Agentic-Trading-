@@ -297,4 +297,8 @@ export class SpreadHunterStrategy extends EventEmitter {
     this.cleanupExpiredSignals();
     return Array.from(this.activeSignals.values());
   }
+
+  clearSignal(marketId: string): void {
+    this.activeSignals.delete(marketId);
+  }
 }

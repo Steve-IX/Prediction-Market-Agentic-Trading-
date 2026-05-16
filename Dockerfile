@@ -1,8 +1,8 @@
 # Multi-stage build for Railway deployment
 FROM node:20-alpine AS base
 
-# Install pnpm
-RUN corepack enable && corepack prepare pnpm@latest --activate
+# Pin pnpm 10.x — pnpm@latest (v11+) requires Node 22+
+RUN corepack enable && corepack prepare pnpm@10.15.0 --activate
 
 # Set working directory
 WORKDIR /app
